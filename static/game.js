@@ -8,6 +8,7 @@ let socket = null;
 let currentRoom = null;
 let currentUserId = null;
 let isMyTurn = true;
+let isPlayerOne = null;
 
 // ===== Utility Functions =====
 
@@ -197,19 +198,31 @@ function initSocket() {
   });
 
   socket.on("match_found", (data) => {
-    currentRoom = data.room;
-    showStatus("Match found! Starting game...", "success");
-    
-    // Join the game room
-    socket.emit("join_room", { room: currentRoom });
-    
-    // Show game UI
-    document.getElementById("game").classList.remove("hidden");
-    document.getElementById("playBtn").disabled = false;
-    
-    // Reset game state
-    resetGameUI();
-  });
+  console.log("Match found:", data);
+
+  currentRoom = data.room;
+
+  // Server tells us whether we are player 1 or player 2
+  if (typeof data.is_p1 === "boolean") {
+    isPlayerOne = data.is_p1;
+  } else {
+    // Fallback if for some reason it's missing
+    isPlayerOne = null;
+  }
+
+  showStatus("Match found! Starting game...", "success");
+
+  // Join the game room
+  socket.emit("join_room", { room: currentRoom });
+
+  // Show game UI
+  document.getElementById("game").classList.remove("hidden");
+  document.getElementById("playBtn").disabled = false;
+
+  // Reset game state
+  resetGameUI();
+});
+
 
   socket.on("timer_update", (data) => {
     const timerEl = document.getElementById("timer");
