@@ -278,11 +278,25 @@ def start_redis_listener():
             event_type = data.get("type")
             
             if event_type == "match_found":
-                # Notify each player in their private room
-                players = data.get("players", [])
-                room = data.get("room")
-                for uid in players:
-                    socketio.emit("match_found", {"room": room}, room=f"user:{uid}")
+            # Notify each player and tell them if they are player 1 or 2
+            players = data.get("players", [])
+            room = data.get("room")
+            if room and len(players) == 2:
+                p1, p2 = players
+        
+                # Player 1's socket
+                socketio.emit(
+                    "match_found",
+                    {"room": room, "is_p1": True},
+                    room=f"user:{p1}"
+                )
+        
+                # Player 2's socket
+                socketio.emit(
+                    "match_found",
+                    {"room": room, "is_p1": False},
+                    room=f"user:{p2}"
+                )
             
             elif event_type == "timer_update":
                 room = data.get("room")
@@ -293,7 +307,8 @@ def start_redis_listener():
                 room = data.get("room")
                 socketio.emit("game_over", {
                     "room": room,
-                    "final_scores": data.get("final_scores", {})
+                    "final_scores": data.get("final_scores", {}),
+                    "winner_id": data.get("winner_id"),
                 }, room=room)
             
             elif event_type == "match_result_saved":
