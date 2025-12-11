@@ -258,7 +258,6 @@ def on_disconnect():
     print(f"User {current_user.id if current_user.is_authenticated else 'unknown'} disconnected")
 
 # ===== Redis Pubsub Listener =====
-
 def start_redis_listener():
     """
     Background thread listening to Redis pubsub events.
@@ -266,64 +265,70 @@ def start_redis_listener():
     """
     pubsub = r.pubsub()
     pubsub.subscribe(EVENT_CHANNEL)
-    
+
     print("Redis pubsub listener started")
-    
+
     for msg in pubsub.listen():
         if msg is None or msg.get("type") != "message":
             continue
-        
+
         try:
             data = json.loads(msg["data"])
             event_type = data.get("type")
-            
+
             if event_type == "match_found":
-            # Notify each player and tell them if they are player 1 or 2
-            players = data.get("players", [])
-            room = data.get("room")
-            if room and len(players) == 2:
-                p1, p2 = players
-        
-                # Player 1's socket
-                socketio.emit(
-                    "match_found",
-                    {"room": room, "is_p1": True},
-                    room=f"user:{p1}"
-                )
-        
-                # Player 2's socket
-                socketio.emit(
-                    "match_found",
-                    {"room": room, "is_p1": False},
-                    room=f"user:{p2}"
-                )
-            
+                # Notify each player and tell them if they are player 1 or 2
+                players = data.get("players", [])
+                room = data.get("room")
+                if room and len(players) == 2:
+                    p1, p2 = players
+
+                    # Player 1's socket
+                    socketio.emit(
+                        "match_found",
+                        {"room": room, "is_p1": True},
+                        room=f"user:{p1}",
+                    )
+
+                    # Player 2's socket
+                    socketio.emit(
+                        "match_found",
+                        {"room": room, "is_p1": False},
+                        room=f"user:{p2}",
+                    )
+
             elif event_type == "timer_update":
                 room = data.get("room")
                 time_left = data.get("time_left")
                 socketio.emit("timer_update", {"time_left": time_left}, room=room)
-            
+
             elif event_type == "game_over":
                 room = data.get("room")
-                socketio.emit("game_over", {
-                    "room": room,
-                    "final_scores": data.get("final_scores", {}),
-                    "winner_id": data.get("winner_id"),
-                }, room=room)
-            
+                socketio.emit(
+                    "game_over",
+                    {
+                        "room": room,
+                        "final_scores": data.get("final_scores", {}),
+                        "winner_id": data.get("winner_id"),
+                    },
+                    room=room,
+                )
+
             elif event_type == "match_result_saved":
                 room = data.get("room")
-                socketio.emit("match_saved", {
-                    "winner_id": data.get("winner_id"),
-                    "scores": data.get("scores")
-                }, room=room)
-                
+                socketio.emit(
+                    "match_saved",
+                    {
+                        "winner_id": data.get("winner_id"),
+                        "scores": data.get("scores"),
+                    },
+                    room=room,
+                )
+
         except json.JSONDecodeError:
             print(f"Invalid JSON in pubsub message: {msg.get('data')}")
         except Exception as e:
             print(f"Error processing pubsub message: {e}")
-
-
 if __name__ == "__main__":
     with app.app_context():
         db.create_all()
