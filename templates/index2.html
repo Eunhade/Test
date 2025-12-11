@@ -1,0 +1,290 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Wordle Battle - Multiplayer Word Game</title>
+  <script src="https://cdn.socket.io/4.6.1/socket.io.min.js"></script>
+  <style>
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+    
+    body {
+      font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      min-height: 100vh;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      padding: 20px;
+    }
+    
+    .container {
+      background: white;
+      border-radius: 20px;
+      box-shadow: 0 20px 60px rgba(0,0,0,0.3);
+      max-width: 600px;
+      width: 100%;
+      padding: 40px;
+    }
+    
+    h1 {
+      text-align: center;
+      color: #667eea;
+      margin-bottom: 30px;
+      font-size: 2.5rem;
+    }
+    
+    .section {
+      margin-bottom: 30px;
+    }
+    
+    .section h2 {
+      color: #333;
+      margin-bottom: 15px;
+      font-size: 1.3rem;
+    }
+    
+    input {
+      width: 100%;
+      padding: 12px;
+      border: 2px solid #ddd;
+      border-radius: 8px;
+      font-size: 1rem;
+      margin-bottom: 10px;
+      transition: border-color 0.3s;
+    }
+    
+    input:focus {
+      outline: none;
+      border-color: #667eea;
+    }
+    
+    button {
+      padding: 12px 24px;
+      background: #667eea;
+      color: white;
+      border: none;
+      border-radius: 8px;
+      font-size: 1rem;
+      cursor: pointer;
+      margin-right: 10px;
+      transition: background 0.3s, transform 0.1s;
+    }
+    
+    button:hover {
+      background: #5568d3;
+      transform: translateY(-2px);
+    }
+    
+    button:active {
+      transform: translateY(0);
+    }
+    
+    button:disabled {
+      background: #ccc;
+      cursor: not-allowed;
+      transform: none;
+    }
+    
+    .play-btn {
+      width: 100%;
+      padding: 16px;
+      font-size: 1.2rem;
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      margin-top: 20px;
+    }
+    
+    .status {
+      padding: 15px;
+      border-radius: 8px;
+      margin-top: 20px;
+      text-align: center;
+      font-weight: 600;
+    }
+    
+    .status.info {
+      background: #e3f2fd;
+      color: #1976d2;
+    }
+    
+    .status.success {
+      background: #e8f5e9;
+      color: #388e3c;
+    }
+    
+    .status.warning {
+      background: #fff3e0;
+      color: #f57c00;
+    }
+    
+    .status.error {
+      background: #ffebee;
+      color: #d32f2f;
+    }
+    
+    #game {
+      margin-top: 30px;
+    }
+    
+    .timer {
+      font-size: 2rem;
+      text-align: center;
+      color: #667eea;
+      margin-bottom: 20px;
+      font-weight: bold;
+    }
+    
+    .scores {
+      display: flex;
+      justify-content: space-around;
+      margin-bottom: 20px;
+    }
+    
+    .score-box {
+      text-align: center;
+      padding: 15px;
+      background: #f5f5f5;
+      border-radius: 8px;
+      flex: 1;
+      margin: 0 10px;
+    }
+    
+    .score-label {
+      font-size: 0.9rem;
+      color: #666;
+      margin-bottom: 5px;
+    }
+    
+    .score-value {
+      font-size: 2rem;
+      font-weight: bold;
+      color: #667eea;
+    }
+    
+    .guess-input {
+      display: flex;
+      gap: 10px;
+      margin-bottom: 20px;
+    }
+    
+    .guess-input input {
+      margin-bottom: 0;
+      text-transform: uppercase;
+    }
+    
+    .guess-input button {
+      margin-right: 0;
+    }
+    
+    .feedback-row {
+      display: flex;
+      gap: 5px;
+      margin-bottom: 10px;
+      justify-content: center;
+    }
+    
+    .letter-box {
+      width: 50px;
+      height: 50px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 1.5rem;
+      font-weight: bold;
+      border-radius: 8px;
+      color: white;
+    }
+    
+    .letter-box.green {
+      background: #6aaa64;
+    }
+    
+    .letter-box.yellow {
+      background: #c9b458;
+    }
+    
+    .letter-box.gray {
+      background: #787c7e;
+    }
+    
+    .stats {
+      display: flex;
+      justify-content: space-around;
+      padding: 20px;
+      background: #f5f5f5;
+      border-radius: 8px;
+      margin-top: 20px;
+    }
+    
+    .stat {
+      text-align: center;
+    }
+    
+    .stat-value {
+      font-size: 2rem;
+      font-weight: bold;
+      color: #667eea;
+    }
+    
+    .stat-label {
+      font-size: 0.9rem;
+      color: #666;
+      margin-top: 5px;
+    }
+    
+    .hidden {
+      display: none;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1> Wordle Battle</h1>
+    
+    <div id="auth" class="section">
+      <h2>Login or Register</h2>
+      <input id="username" placeholder="Username" />
+      <input id="password" placeholder="Password" type="password" />
+      <button id="register">Register</button>
+      <button id="login">Login</button>
+    </div>
+    
+    <div id="loggedIn" class="section hidden">
+      <button id="logout">Logout</button>
+      <button id="playBtn" class="play-btn">🎮 Find Match</button>
+      
+      <div id="userStats" class="stats hidden"></div>
+    </div>
+
+    <div id="status" class="status info hidden"></div>
+    
+    <div id="game" class="hidden">
+      <div id="timer" class="timer">5:00</div>
+      
+      <div class="scores">
+        <div class="score-box">
+          <div class="score-label">Your Score</div>
+          <div id="scoreP1" class="score-value">0</div>
+        </div>
+        <div class="score-box">
+          <div class="score-label">Opponent</div>
+          <div id="scoreP2" class="score-value">0</div>
+        </div>
+      </div>
+      
+      <div class="guess-input">
+        <input id="guessInput" placeholder="Enter 5-letter word" maxlength="5" />
+        <button id="submitGuess">Submit</button>
+      </div>
+      
+      <div id="feedback"></div>
+    </div>
+  </div>
+  
+  <script src="/static/game.js"></script>
+</body>
+</html>
