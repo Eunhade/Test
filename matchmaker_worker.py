@@ -20,13 +20,11 @@ ACTIVE_MATCH_TTL = 60 * 60  # 1 hour
 ONLINE_KEY_FMT = "user:{uid}:online"
 ACTIVE_ROOM_FMT = "user:{uid}:active_room"
 
-
 def is_online(uid: str) -> bool:
     try:
         return bool(r.exists(ONLINE_KEY_FMT.format(uid=uid)))
     except Exception:
         return False
-
 
 def has_active_match(uid: str) -> bool:
     try:
@@ -34,12 +32,8 @@ def has_active_match(uid: str) -> bool:
     except Exception:
         return False
 
-
 def pop_valid_player(timeout: int):
-    """Pop a player from the queue who is online and not already in an active match.
-
-    Offline/stale entries are discarded to prevent matching ghosts.
-    """
+    """Pop a player from the queue who is online and not already in an active match."""
     while True:
         result = r.brpop(QUEUE_KEY, timeout=timeout)
         if not result:
