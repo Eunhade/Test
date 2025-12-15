@@ -226,7 +226,43 @@ def leaderboard():
         "win_rate": round(u.win_rate, 1)
     } for u in top_players])
 
+@app.route("/match_info")
+@login_required
+def match_info():
+    """Return usernames for both players in a room (and who is you/opponent)."""
+    room = (request.args.get("room") or "").strip()
+    if not room:
+        return jsonify({"error": "room required"}), 400
 
+    meta = r.hgetall(f"game:{room}:meta")
+    if not meta:
+        return jsonify({"error": "match not found"}), 404
+
+    try:
+        p1_id = int(meta.get("p1"))
+        p2_id = int(meta.get("p2"))
+    except Exception:
+        return jsonify({"error": "corrupt match data"}), 500
+
+    if current_user.id not in (p1_id, p2_id):
+        return jsonify({"error": "not a player in this match"}), 403
+
+    p1 = User.query.get(p1_id)
+    p2 = User.query.get(p2_id)
+
+    you_is_p1 = (current_user.id == p1_id)
+
+    return jsonify({
+        "room": room,
+        "p1_id": p1_id,
+        "p2_id": p2_id,
+        "p1_username": p1.username if p1 else None,
+        "p2_username": p2.username if p2 else None,
+        "you_id": current_user.id,
+        "you_username": (p1.username if you_is_p1 else p2.username) if (p1 and p2) else current_user.username,
+        "opponent_id": (p2_id if you_is_p1 else p1_id),
+        "opponent_username": (p2.username if you_is_p1 else p1.username) if (p1 and p2) else "Opponent",
+    })
 # --------------------
 # Socket.IO events
 # --------------------
