@@ -106,19 +106,6 @@ def get_game_meta(r, room: str) -> dict:
     gkey = f"game:{room}:meta"
     return r.hgetall(gkey)
 
-def end_game_cleanup(r, room: str):
-    """
-    Remove Redis keys for a completed game.
-    
-    Called after match data is persisted to database.
-    """
-    gkey = f"game:{room}:meta"
-    game_meta = r.hgetall(gkey)
-    
-    # Clean up game metadata and timer
-    r.delete(f"game:{room}:meta")
-    r.delete(f"game:{room}:time_left")
-    
     # Clean up player words if we have player IDs
     if game_meta:
         p1 = game_meta.get("p1")
