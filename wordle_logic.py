@@ -3,7 +3,13 @@ import os
 import random
 
 
-words_file = os.path.join(os.path.dirname(__file__), "data", "valid_words.txt")
+_here = os.path.dirname(__file__)
+
+# Prefer ./data/valid_words.txt (production layout), but fall back to ./valid_words.txt
+words_file = os.path.join(_here, "data", "valid_words.txt")
+if not os.path.exists(words_file):
+    words_file = os.path.join(_here, "valid_words.txt")
+
 with open(words_file, "r") as f:
     VALID_WORDS = set(word.strip().upper() for word in f if word.strip())
 
