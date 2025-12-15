@@ -311,6 +311,96 @@ def on_join_room(data):
         "username": current_user.username
     }, room=room)
 
+@socketio.on("surrender")
+def on_surrender(data):
+    """End the game immediately: surrendering player loses, opponent wins."""
+    room = (data or {}).get("room")
+    if not room:
+        emit("guess_error", {"error": "Missing room"})
+        return
+
+    gkey = f"game:{room}:meta"
+    meta = r.hgetall(gkey)
+    if not meta:
+        emit("guess_error", {"error": "Match not found or already ended"})
+        return
+
+    try:
+        p1_id = int(meta.get("p1"))
+        p2_id = int(meta.get("p2"))
+    except Exception:
+        emit("guess_error", {"error": "Corrupt match data"})
+        return
+
+    if current_user.id not in (p1_id, p2_id):
+        emit("guess_error", {"error": "You are not in this match"})
+        return
+
+    # Idempotency guard so two surrenders / timer don't double-save
+    end_key = f"game:{room}:ended"
+    if not r.set(end_key, "1", nx=True, ex=3600):
+        return  # already ended elsewhere
+
+    winner_id = (p2_id if current_user.id == p1_id else p1_id)
+
+    scores = game_module.get_scores(r, room)
+    score_p1 = int(scores.get("p1", 0))
+    score_p2 = int(scores.get("p2", 0))
+    duration = int(meta.get("duration", 300))
+
+    # Persist match + update stats (same behavior as game_worker)
+    try:
+        match = Match(
+            room=room,
+            p1_id=p1_id,
+            p2_id=p2_id,
+            score_p1=score_p1,
+            score_p2=score_p2,
+            winner_id=winner_id,
+            duration=duration
+        )
+        db.session.add(match)
+
+        user1 = User.query.get(p1_id)
+        user2 = User.query.get(p2_id)
+
+        if user1:
+            user1.total_games = (user1.total_games or 0) + 1
+            if winner_id == user1.id:
+                user1.total_wins = (user1.total_wins or 0) + 1
+
+        if user2:
+            user2.total_games = (user2.total_games or 0) + 1
+            if winner_id == user2.id:
+                user2.total_wins = (user2.total_wins or 0) + 1
+
+        db.session.commit()
+    except Exception:
+        db.session.rollback()
+        r.delete(end_key)  # allow retry if DB write failed
+        emit("guess_error", {"error": "Failed to save surrender result"})
+        return
+
+    # Notify both clients (SocketIO message_queue will broadcast cross-process)
+    socketio.emit("match_saved", {
+        "winner_id": winner_id,
+        "scores": {"p1": score_p1, "p2": score_p2}
+    }, room=room)
+
+    socketio.emit("game_over", {
+        "room": room,
+        "final_scores": {"p1": score_p1, "p2": score_p2},
+        "winner_id": winner_id,
+        "reason": "surrender",
+        "surrendered_by": current_user.id
+    }, room=room)
+
+    # Stop timer thread + cleanup Redis keys so game_worker won't double-end it
+    try:
+        r.delete(f"game:{room}:time_left")
+    except Exception:
+        pass
+    game_module.end_game_cleanup(r, room)
 
 @socketio.on("submit_guess")
 def on_submit_guess(data):
