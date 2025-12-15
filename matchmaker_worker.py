@@ -13,6 +13,9 @@ QUEUE_KEY = "matchmaking_queue"
 EVENT_CHANNEL = "events"
 START_GAME_CHANNEL = "start_game"
 
+# Store active match assignment per user (avoids missing match_found when page reloads)
+ACTIVE_MATCH_TTL = 60 * 60  # 1 hour
+
 def start_matchmaker():
     """
     Main matchmaking loop.
@@ -65,6 +68,13 @@ def start_matchmaker():
             
             # Create game in Redis
             room = create_game(r, p1, p2)
+
+            # Persist match assignment for each user so the web UI can recover
+            # even if the SocketIO event is missed (navigation / refresh).
+            r.setex(f"user:{p1}:active_room", ACTIVE_MATCH_TTL, room)
+            r.setex(f"user:{p1}:active_is_p1", ACTIVE_MATCH_TTL, "1")
+            r.setex(f"user:{p2}:active_room", ACTIVE_MATCH_TTL, room)
+            r.setex(f"user:{p2}:active_is_p1", ACTIVE_MATCH_TTL, "0")
             
             print(f"Matched: Player {p1} vs Player {p2} in room {room}")
             
