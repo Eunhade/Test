@@ -125,5 +125,11 @@ def end_game_cleanup(r, room: str):
         p2 = game_meta.get("p2")
         if p1:
             r.delete(f"game:{room}:player:{p1}:word")
+            # Clear active match assignment
+            r.delete(f"user:{p1}:active_room")
+            r.delete(f"user:{p1}:active_is_p1")
         if p2:
             r.delete(f"game:{room}:player:{p2}:word")
+            # Clear active match assignment
+            r.delete(f"user:{p2}:active_room")
+            r.delete(f"user:{p2}:active_is_p1")
