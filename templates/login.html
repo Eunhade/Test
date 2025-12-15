@@ -1,0 +1,36 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Wordle Battle - Login</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}" />
+</head>
+<body>
+  <div class="container">
+    <header class="header">
+      <h1>Wordle Battle</h1>
+      <p class="subtitle">Log in to enter the lobby</p>
+    </header>
+
+    <div id="status" class="status hidden"></div>
+
+    <div class="card">
+      <label class="label" for="username">Username</label>
+      <input id="username" class="input" type="text" autocomplete="username" />
+
+      <label class="label" for="password">Password</label>
+      <input id="password" class="input" type="password" autocomplete="current-password" />
+
+      <div class="row">
+        <button id="login" class="btn primary">Login</button>
+        <button id="register" class="btn">Register</button>
+      </div>
+
+      <p class="hint">Register creates an account. Login will take you to the lobby.</p>
+    </div>
+  </div>
+
+  <script src="{{ url_for('static', filename='login.js') }}"></script>
+</body>
+</html>

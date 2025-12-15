@@ -1,0 +1,62 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Wordle Battle - Game</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}" />
+</head>
+<body>
+  <div class="container">
+    <header class="header">
+      <h1>Game Room</h1>
+      <p class="subtitle"><span id="identity">...</span></p>
+    </header>
+
+    <div id="status" class="status hidden"></div>
+
+    <div class="card" id="waiting">
+      <h2 class="section-title">Waiting for opponent…</h2>
+      <p class="hint">We’ll start as soon as you’re matched.</p>
+      <div class="row">
+        <button id="backToLobby" class="btn">Back to Lobby</button>
+      </div>
+    </div>
+
+    <div class="card hidden" id="game">
+      <div class="topbar">
+        <div class="scoreboard">
+          <div class="score">
+            <div class="score-label">You</div>
+            <div id="scoreP1" class="score-value">0</div>
+          </div>
+          <div class="score">
+            <div class="score-label">Opponent</div>
+            <div id="scoreP2" class="score-value">0</div>
+          </div>
+        </div>
+
+        <div class="timer">
+          <span class="timer-label">Time</span>
+          <span id="timer" class="timer-value">5:00</span>
+        </div>
+      </div>
+
+      <div class="row">
+        <input id="guessInput" class="input" maxlength="5" placeholder="Enter 5-letter word" />
+        <button id="submitGuess" class="btn primary">Submit</button>
+      </div>
+
+      <div id="feedback" class="feedback"></div>
+
+      <div class="row">
+        <button id="playAgain" class="btn">Play Again</button>
+        <button id="backToLobby2" class="btn">Back to Lobby</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="https://cdn.socket.io/4.7.5/socket.io.min.js"></script>
+  <script src="{{ url_for('static', filename='gamepage.js') }}"></script>
+</body>
+</html>

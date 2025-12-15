@@ -1,0 +1,52 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Wordle Battle - Lobby</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}" />
+</head>
+<body>
+  <div class="container">
+    <header class="header">
+      <h1>Lobby</h1>
+      <p class="subtitle">Welcome back, <span id="usernameDisplay">...</span></p>
+    </header>
+
+    <div id="status" class="status hidden"></div>
+
+    <div class="card">
+      <div class="row">
+        <button id="findMatch" class="btn primary">Matchmaking</button>
+        <button id="toggleStats" class="btn">View Stats</button>
+        <button id="logout" class="btn danger">Logout</button>
+      </div>
+
+      <div id="statsPanel" class="stats hidden">
+        <div class="stat">
+          <div class="stat-value" id="statGames">0</div>
+          <div class="stat-label">Games</div>
+        </div>
+        <div class="stat">
+          <div class="stat-value" id="statWins">0</div>
+          <div class="stat-label">Wins</div>
+        </div>
+        <div class="stat">
+          <div class="stat-value" id="statLosses">0</div>
+          <div class="stat-label">Losses</div>
+        </div>
+        <div class="stat">
+          <div class="stat-value" id="statWinRate">0%</div>
+          <div class="stat-label">Win Rate</div>
+        </div>
+      </div>
+
+      <p class="hint">
+        Clicking <strong>Matchmaking</strong> takes you to the game page, where you’ll wait for an opponent and play.
+      </p>
+    </div>
+  </div>
+
+  <script src="{{ url_for('static', filename='lobby.js') }}"></script>
+</body>
+</html>
