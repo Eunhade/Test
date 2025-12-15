@@ -79,18 +79,19 @@ async function joinQueue() {
   showStatus(res.error || "Failed to join queue", "error");
 }
 
-function startRoom(room, isP1) {
+async function startRoom(room, isP1) {
   currentRoom = room;
   isPlayerOne = Boolean(isP1);
 
   socket.emit("join_room", { room: currentRoom });
-  await updateNamesForRoom(currentRoom);
 
+  // show the game immediately, then fetch names
   showStatus("Match found! Starting game...", "success");
   showGame();
   resetGameUI();
-}
 
+  await updateNamesForRoom(currentRoom);
+}
 function initSocket() {
   if (socket) socket.disconnect();
 
