@@ -35,13 +35,14 @@ def create_app():
     Session(app)
     return app
 
+
 app = create_app()
 
 
 # SocketIO with Redis message queue for multi-process scaling
 socketio = SocketIO(
-    app, 
-    cors_allowed_origins="*", 
+    app,
+    cors_allowed_origins="*",
     message_queue=os.environ.get("REDIS_URL")
 )
 
@@ -55,8 +56,21 @@ r = redis.from_url(os.environ.get("REDIS_URL", "redis://localhost:6379/0"), deco
 QUEUE_KEY = "matchmaking_queue"
 EVENT_CHANNEL = "events"
 
+# Presence tracking to prevent matching with offline/stale queue entries
+ONLINE_TTL = 60  # seconds
+
+
+def touch_online(user_id: int):
+    """Mark user as online with a short TTL (refreshed by heartbeats)."""
+    try:
+        r.setex(f"user:{user_id}:online", ONLINE_TTL, "1")
+    except Exception:
+        pass
+
+
 # Track if pubsub listener has been started
 pubsub_listener_started = False
+
 
 @login_manager.user_loader
 def load_user(user_id):
@@ -65,7 +79,7 @@ def load_user(user_id):
 
 
 # --------------------
-# Basic routes
+# Page routes
 # --------------------
 @app.route("/")
 def index():
@@ -97,41 +111,51 @@ def active_match():
     if not room:
         return jsonify({"active": False})
 
+    # Validate the room still exists; if not, clear stale assignment
+    if not r.exists(f"game:{room}:meta"):
+        r.delete(f"user:{current_user.id}:active_room")
+        r.delete(f"user:{current_user.id}:active_is_p1")
+        return jsonify({"active": False})
+
     is_p1_str = r.get(f"user:{current_user.id}:active_is_p1")
     is_p1 = True if str(is_p1_str) == "1" else False
     return jsonify({"active": True, "room": room, "is_p1": is_p1})
 
 
+# --------------------
+# Auth + API routes
+# --------------------
 @app.route("/register", methods=["POST"])
 def register():
     """Create new user account."""
     data = request.json
     username = data.get("username", "").strip()
     password = data.get("password", "")
-    
+
     if not username or not password:
         return jsonify({"error": "Username and password required"}), 400
-    
+
     if len(username) < 3:
         return jsonify({"error": "Username must be at least 3 characters"}), 400
-    
+
     if len(password) < 6:
         return jsonify({"error": "Password must be at least 6 characters"}), 400
-    
+
     if User.query.filter_by(username=username).first():
         return jsonify({"error": "Username already taken"}), 400
-    
+
     user = User(username=username)
     user.set_password(password)
     db.session.add(user)
-    
+
     try:
         db.session.commit()
         return jsonify({"success": True, "message": "Account created successfully"})
-    except Exception as e:
+    except Exception:
         db.session.rollback()
         return jsonify({"error": "Database error"}), 500
-    
+
+
 @app.route("/login", methods=["POST"])
 def login():
     """Authenticate user and create session."""
@@ -139,20 +163,16 @@ def login():
     username = data.get("username", "").strip()
     password = data.get("password", "")
 
-    print(f"\n\nUsername trying to connect is {username}\n\n")
-    
     user = User.query.filter_by(username=username).first()
-    
+
     if user and user.check_password(password):
         login_user(user)
         return jsonify({
-            "success": True, 
+            "success": True,
             "user_id": user.id,
             "username": user.username
         })
-    
-    print("\n\nError\n\n")
-    
+
     return jsonify({"error": "Invalid username or password"}), 401
 
 
@@ -172,7 +192,7 @@ def join_queue():
     queue_list = r.lrange(QUEUE_KEY, 0, -1)
     if str(current_user.id) in queue_list:
         return jsonify({"error": "Already in queue"}), 400
-    
+
     r.lpush(QUEUE_KEY, current_user.id)
     return jsonify({"queued": True, "user_id": current_user.id})
 
@@ -181,18 +201,24 @@ def join_queue():
 @login_required
 def get_stats():
     """Get current user's statistics."""
+    total_games = int(current_user.total_games or 0)
+    total_wins = int(current_user.total_wins or 0)
+    total_losses = max(0, total_games - total_wins)
+
     return jsonify({
         "username": current_user.username,
-        "total_games": current_user.total_games,
-        "total_wins": current_user.total_wins,
+        "total_games": total_games,
+        "total_wins": total_wins,
+        "total_losses": total_losses,
         "win_rate": round(current_user.win_rate, 1)
     })
+
 
 @app.route("/leaderboard")
 def leaderboard():
     """Get top players by total wins."""
     top_players = User.query.filter(User.total_games >= 1).order_by(User.total_wins.desc()).limit(10).all()
-    
+
     return jsonify([{
         "username": u.username,
         "total_games": u.total_games,
@@ -201,66 +227,84 @@ def leaderboard():
     } for u in top_players])
 
 
-
+# --------------------
+# Socket.IO events
+# --------------------
 @socketio.on("connect")
 def on_connect():
     """Handle new WebSocket connection."""
     global pubsub_listener_started
-    
+
     if not current_user.is_authenticated:
         emit("not_authenticated")
         return False
-    
+
+    # Mark presence
+    touch_online(current_user.id)
+
     # Join private room for this user
     join_room(f"user:{current_user.id}")
     emit("connected", {"user_id": current_user.id, "username": current_user.username})
-    
+
     # Start Redis pubsub listener (only once)
     if not pubsub_listener_started:
         t = threading.Thread(target=start_redis_listener, daemon=True)
         t.start()
         pubsub_listener_started = True
 
+
+@socketio.on("presence")
+def on_presence():
+    """Heartbeat from client to keep online status fresh."""
+    if current_user.is_authenticated:
+        touch_online(current_user.id)
+
+
 @socketio.on("join_room")
 def on_join_room(data):
     """Player joins game room after match found."""
+    touch_online(current_user.id)
+
     room = data.get("room")
     if not room:
         return
-    
+
     join_room(room)
     emit("player_joined", {
         "user_id": current_user.id,
         "username": current_user.username
     }, room=room)
 
+
 @socketio.on("submit_guess")
 def on_submit_guess(data):
     """Process player's word guess."""
+    touch_online(current_user.id)
+
     room = data.get("room")
     guess = data.get("guess", "").strip().upper()
     player_id = current_user.id
-    
+
     # Validate guess
     if len(guess) != 5:
         emit("guess_error", {"error": "Guess must be 5 letters"})
         return
-    
+
     if not guess.isalpha():
         emit("guess_error", {"error": "Guess must contain only letters"})
         return
-    
+
     # Validate word is in dictionary
     if not is_valid_word(guess):
         emit("guess_error", {"error": "Not a valid word"})
         return
-    
+
     # Get player's secret word (scoped to room)
     secret = game_module.get_player_word(r, room, player_id)
     if not secret:
         emit("guess_error", {"error": "Game not started properly"})
         return
-    
+
     # Evaluate guess
     result = evaluate_guess(secret, guess)
     emit("guess_feedback", {
@@ -268,23 +312,32 @@ def on_submit_guess(data):
         "colors": result["colors"],
         "solved": result["solved"]
     })
-    
+
     # If solved, increment score and assign new word
     if result["solved"]:
         game_module.increment_score(r, room, player_id)
         scores = game_module.get_scores(r, room)
-        
+
         socketio.emit("score_update", scores, room=room)
-        
+
         # Assign new word for this player
         new_word = random_word()
         game_module.set_player_word(r, room, player_id, new_word)
         emit("new_word", {"word_length": len(new_word), "message": "Correct! New word assigned"})
 
+
 @socketio.on("disconnect")
 def on_disconnect():
     """Handle WebSocket disconnection."""
+    try:
+        if current_user.is_authenticated:
+            # Remove from matchmaking queue to avoid stale matches
+            r.lrem(QUEUE_KEY, 0, str(current_user.id))
+            r.delete(f"user:{current_user.id}:online")
+    except Exception:
+        pass
     print(f"User {current_user.id if current_user.is_authenticated else 'unknown'} disconnected")
+
 
 # ===== Redis Pubsub Listener =====
 def start_redis_listener():
@@ -312,14 +365,12 @@ def start_redis_listener():
                 if room and len(players) == 2:
                     p1, p2 = players
 
-                    # Player 1's socket
                     socketio.emit(
                         "match_found",
                         {"room": room, "is_p1": True},
                         room=f"user:{p1}",
                     )
 
-                    # Player 2's socket
                     socketio.emit(
                         "match_found",
                         {"room": room, "is_p1": False},
@@ -358,6 +409,8 @@ def start_redis_listener():
             print(f"Invalid JSON in pubsub message: {msg.get('data')}")
         except Exception as e:
             print(f"Error processing pubsub message: {e}")
+
+
 if __name__ == "__main__":
     with app.app_context():
         db.create_all()
