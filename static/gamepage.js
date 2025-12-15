@@ -215,7 +215,13 @@ function displayGuessFeedback(data) {
     setTimeout(hideStatus, 1200);
   }
 }
-
+async function updateNamesForRoom(room) {
+  const info = await api(`/match_info?room=${encodeURIComponent(room)}`);
+  if (info && !info.error) {
+    document.getElementById("youLabel").textContent = info.you_username || "You";
+    document.getElementById("oppLabel").textContent = info.opponent_username || "Opponent";
+  }
+}
 function handleGameOver(data) {
   const input = document.getElementById("guessInput");
   input.disabled = true;
