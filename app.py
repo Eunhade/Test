@@ -1,7 +1,7 @@
 import os
 import json
 import threading
-from flask import Flask, render_template, request, jsonify
+from flask import Flask, render_template, request, jsonify, redirect, url_for
 from flask_session import Session
 from flask_login import LoginManager, login_user, login_required, logout_user, current_user
 from flask_socketio import SocketIO, emit, join_room
@@ -69,8 +69,37 @@ def load_user(user_id):
 # --------------------
 @app.route("/")
 def index():
-    """Serve the main single-page app."""
-    return render_template("index2.html")
+    """Serve login page (or redirect to lobby if already authenticated)."""
+    if current_user.is_authenticated:
+        return redirect(url_for("lobby"))
+    return render_template("login.html")
+
+
+@app.route("/lobby")
+@login_required
+def lobby():
+    """Lobby page after login."""
+    return render_template("lobby.html")
+
+
+@app.route("/game")
+@login_required
+def game_page():
+    """Game page: waiting room + gameplay."""
+    return render_template("game.html")
+
+
+@app.route("/active_match")
+@login_required
+def active_match():
+    """Return current user's active match assignment (prevents missed socket events)."""
+    room = r.get(f"user:{current_user.id}:active_room")
+    if not room:
+        return jsonify({"active": False})
+
+    is_p1_str = r.get(f"user:{current_user.id}:active_is_p1")
+    is_p1 = True if str(is_p1_str) == "1" else False
+    return jsonify({"active": True, "room": room, "is_p1": is_p1})
 
 
 @app.route("/register", methods=["POST"])
