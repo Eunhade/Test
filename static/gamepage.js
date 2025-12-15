@@ -84,6 +84,7 @@ function startRoom(room, isP1) {
   isPlayerOne = Boolean(isP1);
 
   socket.emit("join_room", { room: currentRoom });
+  await updateNamesForRoom(currentRoom);
 
   showStatus("Match found! Starting game...", "success");
   showGame();
