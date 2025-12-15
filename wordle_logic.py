@@ -2,7 +2,6 @@
 import os
 import random
 
-
 _here = os.path.dirname(__file__)
 
 # Prefer ./data/valid_words.txt (production layout), but fall back to ./valid_words.txt
