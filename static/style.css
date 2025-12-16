@@ -14,6 +14,49 @@
   --warn: #f57c00;
   --success: #388e3c;
 }
+/* --- Tile-based Wordle Rows --- */
+
+.guess-container {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-top: 12px;
+}
+
+.guess-row {
+  display: flex;
+  gap: 8px;
+}
+
+.letter-tile {
+  width: 56px;
+  height: 56px;
+  border-radius: 8px;
+  background: #e5e7eb;
+  color: #111;
+  font-size: 1.4rem;
+  font-weight: bold;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  text-transform: uppercase;
+}
+
+/* Wordle colors */
+.letter-tile.correct {
+  background: #10b981;
+  color: white;
+}
+
+.letter-tile.present {
+  background: #f59e0b;
+  color: white;
+}
+
+.letter-tile.absent {
+  background: #9ca3af;
+  color: white;
+}
 
 body{
   font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
