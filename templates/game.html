@@ -3,59 +3,55 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Wordle Battle - Game</title>
+  <title>Wordle Battle - Multiplayer</title>
   <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}" />
+  <script src="https://cdn.socket.io/4.7.5/socket.io.min.js"></script>
 </head>
 <body>
   <div class="container">
-    <header class="header">
-      <h1>Game Room</h1>
-      <p class="subtitle"><span id="identity">...</span></p>
-    </header>
+    <h1>Wordle Battle</h1>
+    <p class="subtitle"><span id="identity">...</span></p>
 
-    <div id="status" class="status hidden"></div>
+    <div id="status" class="status info hidden"></div>
 
-    <div id="waiting" class="card">
+    <div id="waiting" class="section">
       <h2>Matchmaking</h2>
-      <p>Waiting for an opponent...</p>
+      <p style="color: var(--muted); margin-bottom: 12px;">
+        Searching for an opponent… the game starts as soon as you’re matched.
+      </p>
       <div class="row">
-        <button id="backToLobby" class="btn">Back to Lobby</button>
+        <button id="backToLobby" class="btn secondary">Back to Lobby</button>
       </div>
     </div>
 
-    <div id="game" class="card hidden">
-      <div class="topbar">
-        <div class="timer">
-          Time left: <span id="timer">5:00</span>
+    <div id="game" class="section hidden">
+      <div id="timer" class="timer">5:00</div>
+
+      <div class="scores">
+        <div class="score-box">
+          <div class="score-label"><span id="youLabel">You</span></div>
+          <div id="scoreP1" class="score-value">0</div>
         </div>
-        <div class="scores">
-          <div class="score-box">
-            <div class="score-label" id="youLabel">You</div>
-            <div class="score-value" id="scoreP1">0</div>
-          </div>
-          <div class="score-box">
-            <div class="score-label" id="oppLabel">Opponent</div>
-            <div class="score-value" id="scoreP2">0</div>
-          </div>
+        <div class="score-box">
+          <div class="score-label"><span id="oppLabel">Opponent</span></div>
+          <div id="scoreP2" class="score-value">0</div>
         </div>
       </div>
 
-      <div class="input-row">
-        <input id="guessInput" maxlength="5" placeholder="Enter 5-letter guess" />
-        <button id="submitGuess" class="btn primary">Submit</button>
+      <div class="guess-input">
+        <input id="guessInput" type="text" maxlength="5" placeholder="Enter 5-letter word" />
+        <button id="submitGuess" class="btn">Submit</button>
       </div>
 
-      <div id="feedback" class="feedback"></div>
+      <div id="feedback"></div>
 
-      <div class="row">
-        <button id="surrenderBtn" class="btn danger">Surrender</button>
-        <button id="playAgain" class="btn">Play Again</button>
-        <button id="backToLobby2" class="btn">Back to Lobby</button>
+      <div class="row" style="margin-top: 12px;">
+        <button id="playAgain" class="btn secondary" style="flex:1;">Play Again</button>
+        <button id="backToLobby2" class="btn secondary" style="flex:1;">Back to Lobby</button>
       </div>
     </div>
   </div>
 
-  <script src="https://cdn.socket.io/4.7.5/socket.io.min.js"></script>
   <script src="{{ url_for('static', filename='gamepage.js') }}"></script>
 </body>
 </html>
