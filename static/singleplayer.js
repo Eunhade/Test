@@ -1,7 +1,4 @@
-let currentRow = 0;
-const maxRows = 6;
-
-const grid = document.getElementById("wordGrid");
+const guessContainer = document.getElementById("guessContainer");
 const input = document.getElementById("guessInput");
 const submitBtn = document.getElementById("submitBtn");
 const errorBox = document.getElementById("errorMessage");
@@ -12,41 +9,31 @@ function showError(msg) {
   setTimeout(() => errorBox.classList.add("hidden"), 3000);
 }
 
-function initGrid() {
-  grid.innerHTML = "";
-  currentRow = 0;
+function renderGuessRow(guess, colors) {
+  const row = document.createElement("div");
+  row.className = "guess-row";
 
-  for (let r = 0; r < maxRows; r++) {
-    const row = document.createElement("div");
-    row.className = "word-row";
-    for (let c = 0; c < 5; c++) {
-      const cell = document.createElement("div");
-      cell.className = "word-cell";
-      cell.id = `cell-${r}-${c}`;
-      row.appendChild(cell);
-    }
-    grid.appendChild(row);
-  }
-}
-
-function updateRow(row, guess, colors) {
   for (let i = 0; i < 5; i++) {
-    const cell = document.getElementById(`cell-${row}-${i}`);
-    cell.textContent = guess[i];
-    cell.classList.add(
-      colors[i] === "green" ? "correct" :
-      colors[i] === "yellow" ? "present" : "absent"
-    );
+    const tile = document.createElement("div");
+    tile.className = "letter-tile";
+    tile.textContent = guess[i];
+
+    if (colors[i] === "green") tile.classList.add("correct");
+    else if (colors[i] === "yellow") tile.classList.add("present");
+    else tile.classList.add("absent");
+
+    row.appendChild(tile);
   }
+
+  guessContainer.appendChild(row);
 }
 
 async function startGame() {
-  const res = await fetch("/singleplayer/start", { method: "POST" });
-  if (!res.ok) showError("Failed to start new game");
+  await fetch("/singleplayer/start", { method: "POST" });
 }
 
 submitBtn.onclick = async () => {
-  const guess = input.value.trim().toUpperCase();
+  const guess = input.value.toUpperCase();
   if (guess.length !== 5) return showError("Guess must be 5 letters");
 
   const res = await fetch("/singleplayer/guess", {
@@ -58,15 +45,12 @@ submitBtn.onclick = async () => {
   const data = await res.json();
   if (!res.ok) return showError(data.error);
 
-  updateRow(currentRow, guess, data.colors);
-  currentRow++;
-
-  if (data.solved || currentRow >= maxRows) {
-    initGrid();
-  }
-
+  renderGuessRow(guess, data.colors);
   input.value = "";
+
+  if (data.solved) {
+    guessContainer.innerHTML = "";
+  }
 };
 
-initGrid();
 startGame();
