@@ -21,7 +21,13 @@ def create_app():
     """Factory function to create and configure Flask app."""
     app = Flask(__name__)
     app.config["SECRET_KEY"] = os.environ.get("SECRET_KEY", "dev-secret-change-in-production")
-    app.config["SQLALCHEMY_DATABASE_URI"] = os.environ.get("DATABASE_URL", "sqlite:///local.db")
+
+    db_url = os.environ.get("DATABASE_URL", "sqlite:///local.db")
+    # Railway/Heroku sometimes provide postgres:// (SQLAlchemy wants postgresql://)
+    if db_url.startswith("postgres://"):
+        db_url = db_url.replace("postgres://", "postgresql://", 1)
+    app.config["SQLALCHEMY_DATABASE_URI"] = db_url
+
     app.config["SQLALCHEMY_TRACK_MODIFICATIONS"] = False
     app.config["SQLALCHEMY_ENGINE_OPTIONS"] = {
         "pool_pre_ping": True,
@@ -42,11 +48,14 @@ def create_app():
 
 app = create_app()
 
+# Use the same Redis URL everywhere (sessions, Socket.IO message queue, game state)
+REDIS_URL = os.environ.get("REDIS_URL", "redis://localhost:6379/0")
+
 # SocketIO with Redis message queue for multi-process scaling
 socketio = SocketIO(
     app,
     cors_allowed_origins="*",
-    message_queue=os.environ.get("REDIS_URL"),
+    message_queue=REDIS_URL,
 )
 
 # Flask-Login setup
@@ -55,12 +64,12 @@ login_manager.init_app(app)
 login_manager.login_view = "index"
 
 # Redis connection for game state and pubsub
-r = redis.from_url(os.environ.get("REDIS_URL", "redis://localhost:6379/0"), decode_responses=True)
+r = redis.from_url(REDIS_URL, decode_responses=True)
 
 QUEUE_KEY = "matchmaking_queue"
 EVENT_CHANNEL = "events"
 ONLINE_KEY_FMT = "user:{uid}:online"
-ONLINE_TTL = int(os.environ.get("ONLINE_TTL", "90"))
+ONLINE_TTL = int(os.environ.get("ONLINE_TTL", "180"))
 
 
 # Track if pubsub listener has been started (per web process)
@@ -109,36 +118,32 @@ def singleplayer_page():
 # --------------------
 @app.route("/register", methods=["POST"])
 def register():
-    data = request.json or {}
+    data = request.get_json(force=True, silent=True) or {}
     username = (data.get("username") or "").strip()
-    password = data.get("password") or ""
+    password = (data.get("password") or "").strip()
 
     if not username or not password:
         return jsonify({"error": "Username and password required"}), 400
-    if len(username) < 3:
-        return jsonify({"error": "Username must be at least 3 characters"}), 400
-    if len(password) < 6:
-        return jsonify({"error": "Password must be at least 6 characters"}), 400
 
-    if User.query.filter_by(username=username).first():
-        return jsonify({"error": "Username already taken"}), 400
+    existing = User.query.filter_by(username=username).first()
+    if existing:
+        return jsonify({"error": "Username already taken"}), 409
 
     user = User(username=username)
     user.set_password(password)
+
     db.session.add(user)
-    try:
-        db.session.commit()
-        return jsonify({"success": True, "message": "Account created successfully"})
-    except Exception:
-        db.session.rollback()
-        return jsonify({"error": "Database error"}), 500
+    db.session.commit()
+
+    login_user(user)
+    return jsonify({"success": True, "user_id": user.id, "username": user.username})
 
 
 @app.route("/login", methods=["POST"])
 def login():
-    data = request.json or {}
+    data = request.get_json(force=True, silent=True) or {}
     username = (data.get("username") or "").strip()
-    password = data.get("password") or ""
+    password = (data.get("password") or "").strip()
 
     user = User.query.filter_by(username=username).first()
     if user and user.check_password(password):
@@ -150,6 +155,13 @@ def login():
 @app.route("/logout")
 @login_required
 def logout():
+    # Best-effort cleanup of presence (TTL also protects against stale state)
+    try:
+        if getattr(current_user, "is_authenticated", False):
+            r.delete(ONLINE_KEY_FMT.format(uid=current_user.id))
+    except Exception:
+        pass
+
     logout_user()
     return jsonify({"success": True})
 
@@ -157,6 +169,12 @@ def logout():
 @app.route("/queue", methods=["POST"])
 @login_required
 def join_queue():
+    # Refresh online presence right when the user queues (helps on Railway when you wait on lobby)
+    try:
+        r.setex(ONLINE_KEY_FMT.format(uid=current_user.id), ONLINE_TTL, "1")
+    except Exception:
+        pass
+
     # prevent duplicates
     queue_list = r.lrange(QUEUE_KEY, 0, -1)
     if str(current_user.id) in queue_list:
@@ -193,10 +211,89 @@ def leaderboard():
     } for u in top_players])
 
 
+# --------------------
+# Singleplayer API
+# --------------------
+@app.route("/api/new-game", methods=["POST"])
+@login_required
+def sp_new_game():
+    session["sp_word"] = random_word()
+    session["sp_guesses"] = []
+    return jsonify({"success": True})
+
+
+@app.route("/api/guess", methods=["POST"])
+@login_required
+def sp_guess():
+    data = request.get_json(force=True, silent=True) or {}
+    guess = (data.get("guess") or "").strip().upper()
+
+    if not guess or len(guess) != 5 or not guess.isalpha():
+        return jsonify({"success": False, "error": "Guess must be 5 letters"}), 400
+
+    if not is_valid_word(guess):
+        return jsonify({"success": False, "error": "Not a valid word"}), 400
+
+    target = session.get("sp_word")
+    if not target:
+        return jsonify({"success": False, "error": "No active game. Start a new game."}), 400
+
+    result = evaluate_guess(target, guess)
+    guesses = session.get("sp_guesses", [])
+
+    guesses.append({
+        "guess": guess,
+        "colors": result.get("colors", []),
+    })
+    session["sp_guesses"] = guesses
+
+    status = "playing"
+    won = bool(result.get("solved"))
+    if won:
+        status = "won"
+    elif len(guesses) >= 6:
+        status = "lost"
+
+    # Record to DB as a match-like row (optional; keeps leaderboard unified)
+    if status in ("won", "lost"):
+        try:
+            score_p1 = 1 if status == "won" else 0
+            score_p2 = 0
+
+            match = Match(
+                room=f"sp:{current_user.id}:{os.urandom(4).hex()}",
+                p1_id=current_user.id,
+                p2_id=None,
+                score_p1=score_p1,
+                score_p2=score_p2,
+                winner_id=current_user.id if status == "won" else None,
+                duration=0,
+            )
+            db.session.add(match)
+
+            user = User.query.get(current_user.id)
+            if user:
+                user.total_games = (user.total_games or 0) + 1
+                if status == "won":
+                    user.total_wins = (user.total_wins or 0) + 1
+            db.session.commit()
+        except Exception:
+            db.session.rollback()
+
+    return jsonify({
+        "success": True,
+        "status": status,
+        "target": target if status in ("won", "lost") else None,
+        "guesses": guesses,
+    })
+
+
+# --------------------
+# Active match recovery (prevents missed Socket.IO match_found)
+# --------------------
 @app.route("/active_match")
 @login_required
 def active_match():
-    """Return current user's active match assignment (prevents missed socket events)."""
     room = r.get(f"user:{current_user.id}:active_room")
     if not room:
         return jsonify({"active": False})
@@ -208,119 +305,11 @@ def active_match():
         return jsonify({"active": False})
 
     is_p1_str = r.get(f"user:{current_user.id}:active_is_p1")
-    is_p1 = True if str(is_p1_str) == "1" else False
-    return jsonify({"active": True, "room": room, "is_p1": is_p1})
-
-
-@app.route("/match_info")
-@login_required
-def match_info():
-    """Return usernames for both players in a room (and who is you/opponent)."""
-    room = (request.args.get("room") or "").strip()
-    if not room:
-        return jsonify({"error": "room required"}), 400
-
-    meta = r.hgetall(f"game:{room}:meta")
-    if not meta:
-        return jsonify({"error": "match not found"}), 404
-
-    try:
-        p1_id = int(meta.get("p1"))
-        p2_id = int(meta.get("p2"))
-    except Exception:
-        return jsonify({"error": "invalid match metadata"}), 500
-
-    p1 = User.query.get(p1_id)
-    p2 = User.query.get(p2_id)
-
-    you_is_p1 = (current_user.id == p1_id)
     return jsonify({
+        "active": True,
         "room": room,
-        "p1_id": p1_id,
-        "p2_id": p2_id,
-        "p1_username": p1.username if p1 else None,
-        "p2_username": p2.username if p2 else None,
-        "you_id": current_user.id,
-        "you_username": (p1.username if you_is_p1 else p2.username) if (p1 and p2) else current_user.username,
-        "opponent_id": (p2_id if you_is_p1 else p1_id),
-        "opponent_username": (p2.username if you_is_p1 else p1.username) if (p1 and p2) else "Opponent",
+        "is_p1": True if is_p1_str == "1" else False,
     })
-
-
-# --------------------
-# Singleplayer API (session-based)
-# --------------------
-MAX_ATTEMPTS = 6
-
-@app.route("/api/new-game", methods=["POST"])
-@login_required
-def sp_new_game():
-    target = random_word()
-    session["sp_target"] = target
-    session["sp_guesses"] = []
-    session["sp_done"] = False
-    return jsonify({"success": True})
-
-
-@app.route("/api/guess", methods=["POST"])
-@login_required
-def sp_guess():
-    if session.get("sp_done"):
-        return jsonify({"success": False, "error": "Game is over. Start a new game."}), 400
-
-    target = session.get("sp_target")
-    if not target:
-        return jsonify({"success": False, "error": "No active game. Start a new game."}), 400
-
-    data = request.json or {}
-    guess = (data.get("guess") or "").strip().upper()
-
-    if len(guess) != 5:
-        return jsonify({"success": False, "error": "Guess must be 5 letters"}), 400
-    if not guess.isalpha():
-        return jsonify({"success": False, "error": "Guess must contain only letters"}), 400
-    if not is_valid_word(guess):
-        return jsonify({"success": False, "error": "Not a valid word"}), 400
-
-    result = evaluate_guess(target, guess)
-    guesses = session.get("sp_guesses") or []
-    guesses.append({"guess": guess, "colors": result.get("colors", [])})
-    session["sp_guesses"] = guesses
-
-    status = "playing"
-    reveal = None
-
-    if result.get("solved"):
-        status = "won"
-        reveal = target
-        session["sp_done"] = True
-        _record_singleplayer_result(win=True)
-    elif len(guesses) >= MAX_ATTEMPTS:
-        status = "lost"
-        reveal = target
-        session["sp_done"] = True
-        _record_singleplayer_result(win=False)
-
-    return jsonify({
-        "success": True,
-        "guesses": guesses,
-        "status": status,
-        "target": reveal,
-    })
-
-
-def _record_singleplayer_result(win: bool):
-    """Update user stats for singleplayer results."""
-    try:
-        user = User.query.get(current_user.id)
-        if not user:
-            return
-        user.total_games = (user.total_games or 0) + 1
-        if win:
-            user.total_wins = (user.total_wins or 0) + 1
-        db.session.commit()
-    except Exception:
-        db.session.rollback()
 
 
 # --------------------
@@ -337,7 +326,11 @@ def on_connect():
     # Join private room for this user
     join_room(f"user:{current_user.id}")
     # Mark user online for matchmaker (TTL-based presence)
-    r.setex(ONLINE_KEY_FMT.format(uid=current_user.id), ONLINE_TTL, "1")
+    try:
+        r.setex(ONLINE_KEY_FMT.format(uid=current_user.id), ONLINE_TTL, "1")
+    except Exception:
+        pass
+
     emit("connected", {"user_id": current_user.id, "username": current_user.username})
 
     # Start Redis pubsub listener (only once per web process)
@@ -368,12 +361,18 @@ def on_submit_guess(data):
             r.setex(ONLINE_KEY_FMT.format(uid=current_user.id), ONLINE_TTL, "1")
         except Exception:
             pass
+
     room = (data or {}).get("room")
     guess = ((data or {}).get("guess") or "").strip().upper()
-    player_id = current_user.id
 
     if not room:
         emit("guess_error", {"error": "Missing room"})
+        return
+
+    player_id = str(current_user.id)
+
+    if not guess:
+        emit("guess_error", {"error": "Empty guess"})
         return
 
     if len(guess) != 5:
@@ -422,6 +421,11 @@ def on_heartbeat():
         pass
 
 
+@socketio.on("presence")
+def on_presence():
+    """Alias for heartbeat (some clients may emit `presence`)."""
+    return on_heartbeat()
+
 @socketio.on("disconnect")
 def on_disconnect():
     """Clear online presence key (TTL also protects against stale state)."""
@@ -449,18 +453,23 @@ def start_redis_listener():
             event_type = data.get("type")
 
             if event_type == "match_found":
-                players = data.get("players", [])
                 room = data.get("room")
-                if room and len(players) == 2:
-                    p1, p2 = players
+                players = data.get("players", [])
 
-                    socketio.emit("match_found", {"room": room, "is_p1": True}, room=f"user:{p1}")
-                    socketio.emit("match_found", {"room": room, "is_p1": False}, room=f"user:{p2}")
+                for pid in players:
+                    socketio.emit(
+                        "match_found",
+                        {"room": room, "is_p1": (str(pid) == str(players[0]))},
+                        room=f"user:{pid}",
+                    )
 
             elif event_type == "timer_update":
                 room = data.get("room")
-                time_left = data.get("time_left")
-                socketio.emit("timer_update", {"time_left": time_left}, room=room)
+                socketio.emit("timer_update", {"time_left": data.get("time_left")}, room=room)
+
+            elif event_type == "score_update":
+                room = data.get("room")
+                socketio.emit("score_update", data.get("scores", {}), room=room)
 
             elif event_type == "game_over":
                 room = data.get("room")
