@@ -1,6 +1,12 @@
 const socket = io();
+
 let currentRoom = null;
 let isPlayer1 = false;
+
+const waitingArea = document.getElementById("waitingArea");
+const gameArea = document.getElementById("gameArea");
+const waitingStatus = document.getElementById("waitingStatus");
+const cancelQueueBtn = document.getElementById("cancelQueueBtn");
 
 const guessContainer = document.getElementById("guessContainer");
 const input = document.getElementById("guessInput");
@@ -14,6 +20,9 @@ function showError(msg) {
   setTimeout(() => errorBox.classList.add("hidden"), 3000);
 }
 
+/* ======================
+   TILE UI
+====================== */
 function renderGuessRow(guess, colors) {
   const row = document.createElement("div");
   row.className = "guess-row";
@@ -29,10 +38,61 @@ function renderGuessRow(guess, colors) {
 
     row.appendChild(tile);
   }
-
   guessContainer.appendChild(row);
 }
 
+/* ======================
+   MATCHMAKING
+====================== */
+async function joinQueue() {
+  waitingStatus.textContent = "Joining queue…";
+  const res = await fetch("/queue", { method: "POST" });
+  const data = await res.json();
+
+  if (!res.ok && !data.error?.includes("Already")) {
+    waitingStatus.textContent = "Failed to queue";
+  } else {
+    waitingStatus.textContent = "Searching for a match…";
+  }
+}
+
+cancelQueueBtn.onclick = async () => {
+  await fetch("/queue/cancel", { method: "POST" });
+  window.location.href = "/lobby";
+};
+
+/* ======================
+   SOCKET EVENTS
+====================== */
+socket.on("connect", async () => {
+  await joinQueue();   // 🔥 THIS WAS MISSING
+});
+
+socket.on("match_found", data => {
+  currentRoom = data.room;
+  isPlayer1 = data.is_p1;
+
+  waitingArea.classList.add("hidden");
+  gameArea.classList.remove("hidden");
+
+  socket.emit("join_room", { room: currentRoom });
+});
+
+socket.on("guess_feedback", data => {
+  renderGuessRow(data.guess, data.colors);
+});
+
+socket.on("guess_error", data => showError(data.error));
+
+socket.on("timer_update", data => {
+  document.getElementById("timer").textContent =
+    Math.floor(data.time_left / 60) + ":" +
+    String(data.time_left % 60).padStart(2, "0");
+});
+
+/* ======================
+   INPUT
+====================== */
 submitBtn.onclick = () => {
   const guess = input.value.toUpperCase();
   if (guess.length !== 5) return showError("Guess must be 5 letters");
@@ -41,24 +101,9 @@ submitBtn.onclick = () => {
     room: currentRoom,
     guess
   });
-
   input.value = "";
 };
 
 surrenderBtn.onclick = () => {
-  if (!currentRoom) return;
-  socket.emit("surrender", { room: currentRoom });
+  if (currentRoom) socket.emit("surrender", { room: currentRoom });
 };
-
-socket.on("match_found", data => {
-  currentRoom = data.room;
-  isPlayer1 = data.is_p1;
-  document.getElementById("waitingArea").classList.add("hidden");
-  document.getElementById("gameArea").classList.remove("hidden");
-});
-
-socket.on("guess_feedback", data => {
-  renderGuessRow(data.guess, data.colors);
-});
-
-socket.on("guess_error", data => showError(data.error));
