@@ -13,6 +13,12 @@
   --danger: #d32f2f;
   --warn: #f57c00;
   --success: #388e3c;
+
+  /* Wordle tile colors */
+  --tile-correct: #017f70;  /* teal-green like your reference */
+  --tile-present: #c9b458;
+  --tile-absent: #787c7e;
+  --tile-border: #d3d6da;
 }
 
 body{
@@ -201,9 +207,9 @@ h1{
   border-radius: 8px;
   color: white;
 }
-.letter-box.green{ background: #6aaa64; }
-.letter-box.yellow{ background: #c9b458; }
-.letter-box.gray{ background: #787c7e; }
+.letter-box.green{ background: var(--tile-correct); }
+.letter-box.yellow{ background: var(--tile-present); }
+.letter-box.gray{ background: var(--tile-absent); }
 
 /* Singleplayer tiles (smaller) */
 .sp-row{ display:flex; gap:6px; justify-content:center; margin-bottom: 10px; }
@@ -213,9 +219,44 @@ h1{
   font-size: 1.25rem; font-weight: 800;
   border-radius: 8px; color: white;
 }
-.sp-tile.green{ background:#6aaa64; }
-.sp-tile.yellow{ background:#c9b458; }
-.sp-tile.gray{ background:#787c7e; }
+.sp-tile.green{ background: var(--tile-correct); }
+.sp-tile.yellow{ background: var(--tile-present); }
+.sp-tile.gray{ background: var(--tile-absent); }
+
+/* Multiplayer grid tiles (Wordle-style) */
+.word-grid{
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  align-items: center;
+  margin: 18px 0 22px;
+}
+
+.word-row{
+  display: flex;
+  gap: 6px;
+}
+
+.word-cell{
+  width: 50px;
+  height: 50px;
+  border: 2px solid var(--tile-border);
+  background: #fff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 1.65rem;
+  font-weight: 800;
+  letter-spacing: 0.5px;
+  text-transform: uppercase;
+  user-select: none;
+  border-radius: 6px;
+  color: #111;
+}
+
+.word-cell.green{ background: var(--tile-correct); border-color: var(--tile-correct); color: #fff; }
+.word-cell.yellow{ background: var(--tile-present); border-color: var(--tile-present); color: #fff; }
+.word-cell.gray{ background: var(--tile-absent); border-color: var(--tile-absent); color: #fff; }
 
 /* Modal */
 .modal{
