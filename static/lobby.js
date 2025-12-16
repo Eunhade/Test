@@ -120,11 +120,6 @@ document.addEventListener("DOMContentLoaded", async () => {
     window.location = "/game";
   };
 
-  document.getElementById("singlePlayer").onclick = () => {
-    hideStatus();
-    window.location = "/singleplayer";
-  };
-
   document.getElementById("logout").onclick = async () => {
     const res = await api("/logout");
     if (res && res.success) {
