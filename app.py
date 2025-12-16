@@ -2,6 +2,7 @@ import os
 import json
 import threading
 from flask import Flask, render_template, request, jsonify, redirect, url_for, session
+from jinja2 import TemplateNotFound
 from flask_session import Session
 from flask_login import LoginManager, login_user, login_required, logout_user, current_user
 from flask_socketio import SocketIO, emit, join_room
@@ -58,6 +59,9 @@ r = redis.from_url(os.environ.get("REDIS_URL", "redis://localhost:6379/0"), deco
 
 QUEUE_KEY = "matchmaking_queue"
 EVENT_CHANNEL = "events"
+ONLINE_KEY_FMT = "user:{uid}:online"
+ONLINE_TTL = int(os.environ.get("ONLINE_TTL", "90"))
+
 
 # Track if pubsub listener has been started (per web process)
 pubsub_listener_started = False
@@ -332,6 +336,8 @@ def on_connect():
 
     # Join private room for this user
     join_room(f"user:{current_user.id}")
+    # Mark user online for matchmaker (TTL-based presence)
+    r.setex(ONLINE_KEY_FMT.format(uid=current_user.id), ONLINE_TTL, "1")
     emit("connected", {"user_id": current_user.id, "username": current_user.username})
 
     # Start Redis pubsub listener (only once per web process)
@@ -343,6 +349,11 @@ def on_connect():
 
 @socketio.on("join_room")
 def on_join_room(data):
+    if getattr(current_user, "is_authenticated", False):
+        try:
+            r.setex(ONLINE_KEY_FMT.format(uid=current_user.id), ONLINE_TTL, "1")
+        except Exception:
+            pass
     room = (data or {}).get("room")
     if not room:
         return
@@ -352,6 +363,11 @@ def on_join_room(data):
 
 @socketio.on("submit_guess")
 def on_submit_guess(data):
+    if getattr(current_user, "is_authenticated", False):
+        try:
+            r.setex(ONLINE_KEY_FMT.format(uid=current_user.id), ONLINE_TTL, "1")
+        except Exception:
+            pass
     room = (data or {}).get("room")
     guess = ((data or {}).get("guess") or "").strip().upper()
     player_id = current_user.id
@@ -395,10 +411,26 @@ def on_submit_guess(data):
         emit("new_word", {"word_length": len(new_word), "message": "Correct! New word assigned"})
 
 
+@socketio.on("heartbeat")
+def on_heartbeat():
+    """Client heartbeat to keep TTL-based online presence fresh for matchmaking."""
+    if not current_user.is_authenticated:
+        return
+    try:
+        r.setex(ONLINE_KEY_FMT.format(uid=current_user.id), ONLINE_TTL, "1")
+    except Exception:
+        pass
+
+
 @socketio.on("disconnect")
 def on_disconnect():
-    # Presence tracking could be added here if you want
-    pass
+    """Clear online presence key (TTL also protects against stale state)."""
+    if not getattr(current_user, "is_authenticated", False):
+        return
+    try:
+        r.delete(ONLINE_KEY_FMT.format(uid=current_user.id))
+    except Exception:
+        pass
 
 
 # --------------------
