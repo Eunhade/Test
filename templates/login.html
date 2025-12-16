@@ -8,27 +8,21 @@
 </head>
 <body>
   <div class="container">
-    <header class="header">
-      <h1>Wordle Battle</h1>
-      <p class="subtitle">Log in to enter the lobby</p>
-    </header>
+    <h1>Wordle Battle</h1>
+    <p class="subtitle">Login or register to play multiplayer — or jump into single player from the lobby.</p>
 
-    <div id="status" class="status hidden"></div>
-
-    <div class="card">
-      <label class="label" for="username">Username</label>
-      <input id="username" class="input" type="text" autocomplete="username" />
-
-      <label class="label" for="password">Password</label>
-      <input id="password" class="input" type="password" autocomplete="current-password" />
+    <div class="section">
+      <h2>Login or Register</h2>
+      <input id="username" type="text" placeholder="Username" autocomplete="username" />
+      <input id="password" type="password" placeholder="Password" autocomplete="current-password" />
 
       <div class="row">
-        <button id="login" class="btn primary">Login</button>
         <button id="register" class="btn">Register</button>
+        <button id="login" class="btn">Login</button>
       </div>
-
-      <p class="hint">Register creates an account. Login will take you to the lobby.</p>
     </div>
+
+    <div id="status" class="status info hidden"></div>
   </div>
 
   <script src="{{ url_for('static', filename='login.js') }}"></script>
