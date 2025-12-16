@@ -22,7 +22,9 @@ async function api(path, method = "GET", body = null) {
   let data = {};
   try {
     data = await res.json();
-  } catch (_) {}
+  } catch (_) {
+    data = {};
+  }
   data._status = res.status;
   return data;
 }
@@ -48,13 +50,55 @@ async function loadStatsIntoPanel() {
   document.getElementById("statWinRate").textContent = `${stats.win_rate ?? 0}%`;
 }
 
+function renderLeaderboard(list) {
+  const el = document.getElementById("leaderboard");
+  if (!Array.isArray(list) || list.length === 0) {
+    el.innerHTML = `<div style="color: var(--muted);">No players yet.</div>`;
+    return;
+  }
+
+  const rows = list.map((u, idx) => {
+    const winRate = (u.win_rate ?? 0);
+    return `
+      <tr>
+        <td style="padding:10px; font-weight:700;">${idx + 1}</td>
+        <td style="padding:10px;">${u.username ?? "—"}</td>
+        <td style="padding:10px; text-align:right;">${u.total_wins ?? 0}</td>
+        <td style="padding:10px; text-align:right;">${u.total_games ?? 0}</td>
+        <td style="padding:10px; text-align:right;">${winRate}%</td>
+      </tr>
+    `;
+  }).join("");
+
+  el.innerHTML = `
+    <table style="width:100%; border-collapse:collapse;">
+      <thead>
+        <tr style="color: var(--muted); text-transform: uppercase; font-size: 12px;">
+          <th style="text-align:left; padding:10px;">#</th>
+          <th style="text-align:left; padding:10px;">Player</th>
+          <th style="text-align:right; padding:10px;">Wins</th>
+          <th style="text-align:right; padding:10px;">Games</th>
+          <th style="text-align:right; padding:10px;">Win%</th>
+        </tr>
+      </thead>
+      <tbody>${rows}</tbody>
+    </table>
+  `;
+}
+
+async function loadLeaderboard() {
+  const list = await api("/leaderboard");
+  // /leaderboard returns a JSON array on success
+  renderLeaderboard(list);
+}
+
 document.addEventListener("DOMContentLoaded", async () => {
-  // Preload username/stats (panel still hidden until user clicks)
   try {
     await loadStatsIntoPanel();
+    await loadLeaderboard();
   } catch (e) {
     console.error(e);
-    showStatus("Could not load stats", "error");
+    showStatus("Could not load lobby data", "error");
   }
 
   document.getElementById("toggleStats").onclick = async () => {
@@ -74,6 +118,11 @@ document.addEventListener("DOMContentLoaded", async () => {
   document.getElementById("findMatch").onclick = () => {
     hideStatus();
     window.location = "/game";
+  };
+
+  document.getElementById("singlePlayer").onclick = () => {
+    hideStatus();
+    window.location = "/singleplayer";
   };
 
   document.getElementById("logout").onclick = async () => {
