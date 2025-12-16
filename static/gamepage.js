@@ -125,10 +125,12 @@ function updateRowWithGuess(row, guess, colors) {
     const cell = document.getElementById(`cell-${row}-${col}`);
     if (!cell) continue;
     cell.textContent = guess[col] || "";
-    cell.classList.remove("correct", "present", "absent");
-    if (colors[col] === "green") cell.classList.add("correct");
-    else if (colors[col] === "yellow") cell.classList.add("present");
-    else if (colors[col] === "gray") cell.classList.add("absent");
+    // Use the same Wordle-style classes as the server returns: green/yellow/gray
+    // (This matches singleplayer + existing CSS and handles duplicates correctly
+    // because the backend uses a 2-pass Wordle evaluation.)
+    cell.classList.remove("green", "yellow", "gray", "correct", "present", "absent");
+    const c = (colors && colors[col]) ? String(colors[col]) : "gray";
+    if (c === "green" || c === "yellow" || c === "gray") cell.classList.add(c);
   }
 }
 
