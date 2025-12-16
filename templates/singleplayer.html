@@ -1,48 +1,48 @@
-<!DOCTYPE html>
-<html>
+<!doctype html>
+<html lang="en">
 <head>
-  <title>Wordle Battle – Single Player</title>
-  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Wordle Battle - Single Player</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}" />
 </head>
 <body>
   <div class="container">
     <h1>Wordle Battle</h1>
+    <p class="subtitle">Single Player Mode</p>
 
-    <div class="game-area">
-      <!-- Header -->
-      <div class="game-header">
-        <div class="timer-section">
-          <h3>Single Player</h3>
-          <div class="timer">Practice Mode</div>
-        </div>
+    <div id="status" class="status info hidden"></div>
 
-        <div class="score-section">
-          <div class="score-box">
-            <span class="player-label you">You</span>
-            <span id="myScore" class="score">0</span>
-          </div>
-        </div>
+    <div class="row" style="justify-content: space-between; margin-bottom: 12px;">
+      <button id="backToLobby" class="btn secondary">← Back to Lobby</button>
+      <button id="logout" class="btn danger">Logout</button>
+    </div>
+
+    <div class="section">
+      <h2>Play</h2>
+      <p style="color: var(--muted); margin-bottom: 12px;">
+        Guess the 5-letter word. Green = correct spot, Yellow = wrong spot, Gray = not in the word.
+      </p>
+
+      <button id="newGame" class="btn play">🆕 New Game</button>
+
+      <div class="guess-input" style="margin-top: 14px;">
+        <input id="guessInput" type="text" maxlength="5" placeholder="Enter 5-letter word" />
+        <button id="guessBtn" class="btn">Guess</button>
       </div>
 
-      <!-- Message -->
-      <div id="gameMessage" class="game-message">
-        Guess the 5-letter word!
+      <div id="gameMessage" style="text-align:center; font-weight: 700; margin: 10px 0;"></div>
+      <div id="guesses"></div>
+    </div>
+
+    <div class="section">
+      <div class="row" style="margin-bottom: 10px;">
+        <button id="toggleStats" class="btn secondary" style="flex:1;">📊 Stats</button>
+        <button id="toggleLeaderboard" class="btn secondary" style="flex:1;">🏆 Leaderboard</button>
       </div>
 
-      <!-- Grid -->
-      <div id="guessContainer" class="guess-container"></div>
-
-      <!-- Input -->
-      <div class="input-area">
-        <input id="guessInput" maxlength="5" placeholder="Enter guess..." autocomplete="off">
-        <button id="submitBtn" class="btn">Submit</button>
-      </div>
-
-      <div id="errorMessage" class="error-message hidden"></div>
-
-      <div style="margin-top: 16px; text-align:center;">
-        <button onclick="location.href='/lobby'" class="btn secondary">Back to Lobby</button>
-      </div>
+      <div id="statsPanel" class="stats hidden"></div>
+      <div id="leaderboardPanel" class="hidden" style="background: var(--card2); border-radius: 10px; padding: 12px;"></div>
     </div>
   </div>
 
