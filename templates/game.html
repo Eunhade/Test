@@ -1,57 +1,76 @@
-<!doctype html>
-<html lang="en">
+<!DOCTYPE html>
+<html>
 <head>
-  <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Wordle Battle - Multiplayer</title>
-  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}" />
-  <script src="https://cdn.socket.io/4.7.5/socket.io.min.js"></script>
+    <title>Wordle Battle - Game</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+    <script src="https://cdn.socket.io/4.5.4/socket.io.min.js"></script>
 </head>
 <body>
-  <div class="container">
-    <h1>Wordle Battle</h1>
-    <p class="subtitle"><span id="identity">...</span></p>
-
-    <div id="status" class="status info hidden"></div>
-
-    <div id="waiting" class="section">
-      <h2>Matchmaking</h2>
-      <p style="color: var(--muted); margin-bottom: 12px;">
-        Searching for an opponent… the game starts as soon as you’re matched.
-      </p>
-      <div class="row">
-        <button id="backToLobby" class="btn secondary">Back to Lobby</button>
-      </div>
-    </div>
-
-    <div id="game" class="section hidden">
-      <div id="timer" class="timer">5:00</div>
-
-      <div class="scores">
-        <div class="score-box">
-          <div class="score-label"><span id="youLabel">You</span></div>
-          <div id="scoreP1" class="score-value">0</div>
+    <div class="container">
+        <h1>Wordle Battle</h1>
+        
+        <!-- Waiting Area -->
+        <div id="waitingArea" class="waiting-area">
+            <h2>Waiting for Opponent...</h2>
+            <div class="loading-spinner"></div>
+            <p id="waitingStatus">Searching for a match...</p>
+            <p id="opponentStatus"></p>
         </div>
-        <div class="score-box">
-          <div class="score-label"><span id="oppLabel">Opponent</span></div>
-          <div id="scoreP2" class="score-value">0</div>
+        
+        <!-- Game Area -->
+        <div id="gameArea" class="game-area hidden">
+            <!-- Game Header -->
+            <div class="game-header">
+                <div class="timer-section">
+                    <h3>Time Remaining</h3>
+                    <div id="timer" class="timer">5:00</div>
+                </div>
+                
+                <div class="score-section">
+                    <div class="score-box">
+                        <span id="youLabel" class="player-label you">You</span>
+                        <span id="myScore" class="score">0</span>
+                    </div>
+                    <div class="score-box">
+                        <span id="oppLabel" class="player-label opponent">Opponent</span>
+                        <span id="oppScore" class="score">0</span>
+                    </div>
+                </div>
+            </div>
+            
+            <!-- Game Message -->
+            <div id="gameMessage" class="game-message">
+                Guess the 5-letter word!
+            </div>
+            
+            <!-- Word Grid -->
+            <div id="wordGrid" class="word-grid"></div>
+            
+            <!-- Input Area -->
+            <div class="input-area">
+                <input type="text" id="guessInput" maxlength="5" placeholder="Enter guess..." autocomplete="off">
+                <button id="submitBtn" class="btn btn-primary">Submit</button>
+                <button id="surrenderBtn" class="btn btn-danger">Surrender</button>
+            </div>
+            
+            <!-- Error Message -->
+            <div id="errorMessage" class="error-message hidden"></div>
+            
+            <!-- Game Results -->
+            <div id="gameResults" class="game-results hidden">
+                <h2>Game Over!</h2>
+                <div id="resultMessage"></div>
+                <div id="finalScores"></div>
+                <button id="playAgainBtn" class="btn btn-primary">Back to Lobby</button>
+            </div>
         </div>
-      </div>
-
-      <div class="guess-input">
-        <input id="guessInput" type="text" maxlength="5" placeholder="Enter 5-letter word" />
-        <button id="submitGuess" class="btn">Submit</button>
-      </div>
-
-      <div id="feedback"></div>
-
-      <div class="row" style="margin-top: 12px;">
-        <button id="playAgain" class="btn secondary" style="flex:1;">Play Again</button>
-        <button id="backToLobby2" class="btn secondary" style="flex:1;">Back to Lobby</button>
-      </div>
+        
+        <!-- Connection Status -->
+        <div id="connectionStatus" class="connection-status">
+            Connecting...
+        </div>
     </div>
-  </div>
-
-  <script src="{{ url_for('static', filename='gamepage.js') }}"></script>
+    
+    <script src="{{ url_for('static', filename='gamepage.js') }}"></script>
 </body>
 </html>
