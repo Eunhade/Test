@@ -108,6 +108,35 @@ def game_page():
 def singleplayer_page():
     return render_template("singleplayer.html")
 
+@app.route("/singleplayer/start", methods=["POST"])
+@login_required
+def singleplayer_start():
+    word = random_word()
+    r.setex(f"sp:{current_user.id}:word", 3600, word)
+    r.set(f"sp:{current_user.id}:score", 0)
+    return jsonify({"success": True})
+@app.route("/singleplayer/guess", methods=["POST"])
+@login_required
+def singleplayer_guess():
+    data = request.json
+    guess = data.get("guess", "").upper()
+
+    if len(guess) != 5 or not guess.isalpha():
+        return jsonify({"error": "Invalid guess"}), 400
+    if not is_valid_word(guess):
+        return jsonify({"error": "Not a valid word"}), 400
+
+    word = r.get(f"sp:{current_user.id}:word")
+    if not word:
+        return jsonify({"error": "No active game"}), 400
+
+    result = evaluate_guess(word, guess)
+
+    if result["solved"]:
+        r.incr(f"sp:{current_user.id}:score")
+        r.set(f"sp:{current_user.id}:word", random_word())
+
+    return jsonify(result)
 
 @app.route("/active_match")
 @login_required
