@@ -1,98 +1,39 @@
-// gamepage.js - Multiplayer game client with active match restore + name display + surrender
-// UPDATED: auto-join matchmaking queue on /game load + cancel queue button
+// static/gamepage.js
+// Game page: connects Socket.IO, queues for matchmaking, waits, and plays.
 
-const socket = io();
-
+let socket = null;
 let currentRoom = null;
-let isPlayer1 = null;
 let currentUserId = null;
-let currentUsername = null;
+let isPlayerOne = null; // boolean
 
-let matchStarted = false;
-let matchEnded = false;
-
-let currentWordRow = 0;
-let currentGuesses = [];
-const maxRows = 6;
-
-let heartbeatInterval = null;
-
-// DOM elements
-const waitingArea = document.getElementById("waitingArea");
-const gameArea = document.getElementById("gameArea");
-const waitingStatus = document.getElementById("waitingStatus");
-const opponentStatus = document.getElementById("opponentStatus");
-const timerElement = document.getElementById("timer");
-const myScoreElement = document.getElementById("myScore");
-const oppScoreElement = document.getElementById("oppScore");
-const youLabel = document.getElementById("youLabel");
-const oppLabel = document.getElementById("oppLabel");
-const gameMessage = document.getElementById("gameMessage");
-const wordGrid = document.getElementById("wordGrid");
-const guessInput = document.getElementById("guessInput");
-const submitBtn = document.getElementById("submitBtn");
-const surrenderBtn = document.getElementById("surrenderBtn");
-const cancelQueueBtn = document.getElementById("cancelQueueBtn");
-const backToLobbyBtn = document.getElementById("backToLobbyBtn");
-const errorMessage = document.getElementById("errorMessage");
-const gameResults = document.getElementById("gameResults");
-const resultMessage = document.getElementById("resultMessage");
-const finalScores = document.getElementById("finalScores");
-const playAgainBtn = document.getElementById("playAgainBtn");
-const connectionStatus = document.getElementById("connectionStatus");
-
-function startHeartbeat() {
-  if (heartbeatInterval) clearInterval(heartbeatInterval);
-  heartbeatInterval = setInterval(() => {
-    try {
-      if (socket && socket.connected) socket.emit("presence");
-    } catch (_) {}
-  }, 20000);
+function showStatus(message, type = "info") {
+  const el = document.getElementById("status");
+  el.textContent = message;
+  el.className = `status ${type}`;
+  el.classList.remove("hidden");
 }
 
-function stopHeartbeat() {
-  if (heartbeatInterval) clearInterval(heartbeatInterval);
-  heartbeatInterval = null;
+function hideStatus() {
+  document.getElementById("status").classList.add("hidden");
 }
 
-async function postJson(path, body = null) {
-  const opts = { method: "POST", headers: { "Content-Type": "application/json" } };
+async function api(path, method = "GET", body = null) {
+  const opts = {
+    method,
+    headers: { "Content-Type": "application/json" },
+  };
   if (body) opts.body = JSON.stringify(body);
+
   const res = await fetch(path, opts);
   let data = {};
-  try { data = await res.json(); } catch (_) { data = {}; }
+  try {
+    data = await res.json();
+  } catch (_) {
+    // If we got HTML, the session probably expired
+    data = {};
+  }
   data._status = res.status;
   return data;
-}
-
-async function queueForMatch() {
-  try {
-    waitingStatus.textContent = "Joining matchmaking queue...";
-    const res = await postJson("/queue");
-    if (res.queued) {
-      waitingStatus.textContent = "Searching for a match...";
-      return true;
-    }
-    if (res._status === 400 && (res.error || "").toLowerCase().includes("already")) {
-      waitingStatus.textContent = "Searching for a match...";
-      return true;
-    }
-    waitingStatus.textContent = res.error || "Failed to join queue";
-    return false;
-  } catch (_) {
-    waitingStatus.textContent = "Failed to join queue";
-    return false;
-  }
-}
-
-function showError(message) {
-  errorMessage.textContent = message;
-  errorMessage.classList.remove("hidden");
-  setTimeout(() => errorMessage.classList.add("hidden"), 3000);
-}
-
-function hideError() {
-  errorMessage.classList.add("hidden");
 }
 
 function formatTime(seconds) {
@@ -101,305 +42,238 @@ function formatTime(seconds) {
   return `${mins}:${secs.toString().padStart(2, "0")}`;
 }
 
-function initGrid() {
-  wordGrid.innerHTML = "";
-  currentWordRow = 0;
-  currentGuesses = [];
+function showWaiting() {
+  document.getElementById("waiting").classList.remove("hidden");
+  document.getElementById("game").classList.add("hidden");
+}
 
-  for (let row = 0; row < maxRows; row++) {
-    const rowDiv = document.createElement("div");
-    rowDiv.className = "word-row";
+function showGame() {
+  document.getElementById("waiting").classList.add("hidden");
+  document.getElementById("game").classList.remove("hidden");
+}
 
-    for (let col = 0; col < 5; col++) {
-      const cell = document.createElement("div");
-      cell.className = "word-cell";
-      cell.id = `cell-${row}-${col}`;
-      rowDiv.appendChild(cell);
-    }
-    wordGrid.appendChild(rowDiv);
+function resetGameUI() {
+  document.getElementById("scoreP1").textContent = "0";
+  document.getElementById("scoreP2").textContent = "0";
+  const timerEl = document.getElementById("timer");
+  timerEl.textContent = "5:00";
+  timerEl.style.color = "";
+
+  document.getElementById("feedback").innerHTML = "";
+  const input = document.getElementById("guessInput");
+  input.value = "";
+  input.disabled = false;
+  document.getElementById("submitGuess").disabled = false;
+}
+
+async function joinQueue() {
+  const res = await api("/queue", "POST");
+  if (res.queued) {
+    showStatus("Searching for opponent...", "info");
+    return;
   }
-}
-
-function updateRowWithGuess(row, guess, colors) {
-  for (let col = 0; col < 5; col++) {
-    const cell = document.getElementById(`cell-${row}-${col}`);
-    if (!cell) continue;
-    cell.textContent = guess[col] || "";
-    cell.classList.remove("correct", "present", "absent");
-    if (colors[col] === "green") cell.classList.add("correct");
-    else if (colors[col] === "yellow") cell.classList.add("present");
-    else if (colors[col] === "gray") cell.classList.add("absent");
+  if (res.error === "Already in queue") {
+    showStatus("Already searching for an opponent...", "info");
+    return;
   }
+  showStatus(res.error || "Failed to join queue", "error");
 }
 
-function getMeAndOpponentScores(scores) {
-  const p1 = Number(scores?.p1 ?? 0);
-  const p2 = Number(scores?.p2 ?? 0);
-  return isPlayer1 ? { me: p1, opp: p2 } : { me: p2, opp: p1 };
+async function startRoom(room, isP1) {
+  currentRoom = room;
+  isPlayerOne = Boolean(isP1);
+
+  socket.emit("join_room", { room: currentRoom });
+
+  // show the game immediately, then fetch names
+  showStatus("Match found! Starting game...", "success");
+  showGame();
+  resetGameUI();
+
+  await updateNamesForRoom(currentRoom);
 }
+function initSocket() {
+  if (socket) socket.disconnect();
 
-async function updateNamesForRoom(room) {
-  if (!room) return;
-  try {
-    const res = await fetch(`/match_info?room=${encodeURIComponent(room)}`);
-    if (!res.ok) return;
-    const data = await res.json();
+  // Uses cookies/session from Flask-Login
+  socket = io();
 
-    if (youLabel) youLabel.textContent = data.you_username || "You";
-    if (oppLabel) oppLabel.textContent = data.opponent_username || "Opponent";
+  socket.on("not_authenticated", () => {
+    showStatus("Please log in first", "error");
+    setTimeout(() => (window.location = "/"), 800);
+  });
 
-    if (opponentStatus && data.opponent_username) {
-      opponentStatus.textContent = `Opponent: ${data.opponent_username}`;
+  socket.on("connected", async (data) => {
+    currentUserId = data.user_id;
+    document.getElementById("identity").textContent = `Logged in as ${data.username}`;
+
+    // First: see if we were already assigned a room (prevents missed match_found)
+    const active = await api("/active_match");
+    if (active && active.active) {
+      startRoom(active.room, active.is_p1);
+      return;
     }
-  } catch (_) {}
-}
 
-function setWaitingUI() {
-  waitingArea.classList.remove("hidden");
-  gameArea.classList.add("hidden");
-  waitingStatus.textContent = "Searching for a match...";
-  opponentStatus.textContent = "";
-  connectionStatus.textContent = socket.connected ? "Connected" : "Connecting...";
-}
+    // Otherwise: queue now and wait
+    showWaiting();
+    await joinQueue();
+  });
 
-function setGameUI() {
-  waitingArea.classList.add("hidden");
-  gameArea.classList.remove("hidden");
-  connectionStatus.textContent = "In Game";
-}
+  socket.on("match_found", (data) => {
+    // If we were already in a room (refresh), ignore duplicates
+    if (currentRoom) return;
+    startRoom(data.room, data.is_p1);
+  });
 
-function disableInputs(disabled) {
-  guessInput.disabled = disabled;
-  submitBtn.disabled = disabled;
-  if (surrenderBtn) surrenderBtn.disabled = disabled;
-}
+  socket.on("timer_update", (data) => {
+    const timerEl = document.getElementById("timer");
+    timerEl.textContent = formatTime(Number(data.time_left || 0));
 
-function handleGameOver(data) {
-  matchEnded = true;
-  disableInputs(true);
-  stopHeartbeat();
-
-  gameResults.classList.remove("hidden");
-
-  const final = data?.final_scores || {};
-  const scores = getMeAndOpponentScores(final);
-
-  const winnerId = data?.winner_id ?? null;
-  const reason = data?.reason || "time";
-  const surrenderedBy = data?.surrendered_by ?? null;
-
-  let msg = "";
-  if (reason === "surrender") {
-    if (surrenderedBy && currentUserId && Number(surrenderedBy) === Number(currentUserId)) {
-      msg = "You surrendered. You lose.";
+    if (data.time_left <= 30) {
+      timerEl.style.color = "#d32f2f";
+    } else if (data.time_left <= 60) {
+      timerEl.style.color = "#f57c00";
     } else {
-      msg = "Your opponent surrendered. You win!";
-    }
-  } else {
-    if (winnerId === null || winnerId === undefined) {
-      msg = "It's a tie!";
-    } else if (currentUserId && Number(winnerId) === Number(currentUserId)) {
-      msg = "You win!";
-    } else {
-      msg = "You lose!";
-    }
-  }
-
-  resultMessage.textContent = msg;
-  finalScores.innerHTML = `
-        <p><strong>${youLabel ? youLabel.textContent : "You"}:</strong> ${scores.me}</p>
-        <p><strong>${oppLabel ? oppLabel.textContent : "Opponent"}:</strong> ${scores.opp}</p>
-    `;
-
-  connectionStatus.textContent = "Game Over";
-}
-
-async function tryRestoreActiveMatch() {
-  try {
-    const res = await fetch("/active_match");
-    if (!res.ok) return false;
-    const data = await res.json();
-
-    if (!data.active) return false;
-
-    currentRoom = data.room;
-    isPlayer1 = !!data.is_p1;
-    matchStarted = true;
-    matchEnded = false;
-
-    setGameUI();
-    initGrid();
-    disableInputs(false);
-
-    socket.emit("join_room", { room: currentRoom });
-    updateNamesForRoom(currentRoom);
-
-    if (opponentStatus) opponentStatus.textContent = "Match restored. Rejoining...";
-    return true;
-  } catch (_) {
-    return false;
-  }
-}
-
-// --------------------
-// Socket.IO handlers
-// --------------------
-socket.on("connect", () => {
-  connectionStatus.textContent = "Connected";
-  startHeartbeat();
-});
-
-socket.on("disconnect", () => {
-  connectionStatus.textContent = "Disconnected";
-});
-
-socket.on("connected", (data) => {
-  currentUserId = data.user_id;
-  currentUsername = data.username;
-
-  tryRestoreActiveMatch().then(async (restored) => {
-    if (!restored) {
-      setWaitingUI();
-      await queueForMatch(); // ✅ THIS WAS MISSING IN YOUR ZIP
+      timerEl.style.color = "#667eea";
     }
   });
-});
 
-socket.on("match_found", (data) => {
-  if (matchStarted && currentRoom) return;
-  matchStarted = true;
-  matchEnded = false;
+  socket.on("score_update", (data) => {
+    let myScore, oppScore;
 
-  currentRoom = data.room;
-  isPlayer1 = !!data.is_p1;
+    if (isPlayerOne) {
+      myScore = data.p1;
+      oppScore = data.p2;
+    } else {
+      myScore = data.p2;
+      oppScore = data.p1;
+    }
 
-  waitingStatus.textContent = "Match found! Preparing game...";
-  opponentStatus.textContent = "Starting soon...";
+    document.getElementById("scoreP1").textContent = String(myScore ?? 0);
+    document.getElementById("scoreP2").textContent = String(oppScore ?? 0);
+  });
 
-  setGameUI();
-  initGrid();
-  disableInputs(false);
+  socket.on("guess_feedback", (data) => {
+    displayGuessFeedback(data);
+  });
 
-  if (surrenderBtn) {
-    surrenderBtn.disabled = false;
-    surrenderBtn.textContent = "Surrender";
-  }
+  socket.on("guess_error", (data) => {
+    showStatus(data.error || "Guess error", "error");
+  });
 
-  setTimeout(() => {
-    socket.emit("join_room", { room: currentRoom });
-  }, 150);
+  socket.on("new_word", (data) => {
+    showStatus(data.message || "Correct!", "success");
+    setTimeout(hideStatus, 1500);
+  });
 
-  updateNamesForRoom(currentRoom);
-});
+  socket.on("game_over", (data) => {
+    handleGameOver(data);
+  });
+}
 
-socket.on("timer_update", (data) => {
-  if (matchEnded) return;
-  const t = Number(data.time_left ?? 0);
-  timerElement.textContent = formatTime(Math.max(0, t));
-});
+function submitGuess() {
+  if (!socket || !currentRoom) return;
 
-socket.on("score_update", (scores) => {
-  if (matchEnded) return;
-  const s = getMeAndOpponentScores(scores);
-  myScoreElement.textContent = String(s.me);
-  oppScoreElement.textContent = String(s.opp);
-});
-
-socket.on("guess_feedback", (data) => {
-  hideError();
-
-  const guess = data.guess || "";
-  const colors = data.colors || [];
-  const solved = !!data.solved;
-
-  currentGuesses.push(guess);
-  updateRowWithGuess(currentWordRow, guess, colors);
-  currentWordRow++;
-
-  if (solved) guessInput.value = "";
-
-  if (currentWordRow >= maxRows) initGrid();
-});
-
-socket.on("new_word", (data) => {
-  if (data?.message) {
-    gameMessage.textContent = data.message;
-    setTimeout(() => (gameMessage.textContent = "Guess the 5-letter word!"), 1500);
-  }
-});
-
-socket.on("guess_error", (data) => {
-  showError(data.error || "Error");
-});
-
-socket.on("game_over", (data) => {
-  handleGameOver(data);
-});
-
-// --------------------
-// UI events
-// --------------------
-submitBtn.addEventListener("click", () => {
-  if (matchEnded) return;
-  if (!currentRoom) return;
-
-  const guess = (guessInput.value || "").trim().toUpperCase();
+  const input = document.getElementById("guessInput");
+  const guess = input.value.trim().toUpperCase();
 
   if (guess.length !== 5) {
-    showError("Guess must be 5 letters");
+    showStatus("Guess must be 5 letters", "error");
+    return;
+  }
+
+  if (!guess.match(/^[A-Z]+$/)) {
+    showStatus("Guess must contain only letters", "error");
     return;
   }
 
   socket.emit("submit_guess", { room: currentRoom, guess });
-  guessInput.value = "";
-});
-
-guessInput.addEventListener("keydown", (e) => {
-  if (e.key === "Enter") submitBtn.click();
-});
-
-if (surrenderBtn) {
-  surrenderBtn.addEventListener("click", () => {
-    if (matchEnded) return;
-    if (!currentRoom) return;
-
-    const ok = confirm("Are you sure you want to surrender? You will lose this match.");
-    if (!ok) return;
-
-    surrenderBtn.disabled = true;
-    surrenderBtn.textContent = "Surrendering...";
-    disableInputs(true);
-
-    socket.emit("surrender", { room: currentRoom });
-  });
+  input.value = "";
 }
 
-if (cancelQueueBtn) {
-  cancelQueueBtn.addEventListener("click", async () => {
-    try {
-      cancelQueueBtn.disabled = true;
-      waitingStatus.textContent = "Canceling queue...";
-      await postJson("/queue/cancel");
-      stopHeartbeat();
-      window.location.href = "/lobby";
-    } catch (_) {
-      cancelQueueBtn.disabled = false;
-      waitingStatus.textContent = "Failed to cancel queue";
-    }
-  });
+function displayGuessFeedback(data) {
+  const feedbackEl = document.getElementById("feedback");
+
+  const row = document.createElement("div");
+  row.className = "feedback-row";
+
+  for (let i = 0; i < data.guess.length; i++) {
+    const box = document.createElement("div");
+    box.className = `letter-box ${data.colors[i]}`;
+    box.textContent = data.guess[i];
+    row.appendChild(box);
+  }
+
+  // Most recent first
+  feedbackEl.insertBefore(row, feedbackEl.firstChild);
+
+  // Keep only last 6
+  while (feedbackEl.children.length > 6) {
+    feedbackEl.removeChild(feedbackEl.lastChild);
+  }
+
+  if (data.solved) {
+    showStatus("🎉 Correct! +1 point", "success");
+    setTimeout(hideStatus, 1200);
+  }
+}
+async function updateNamesForRoom(room) {
+  const info = await api(`/match_info?room=${encodeURIComponent(room)}`);
+  if (info && !info.error) {
+    document.getElementById("youLabel").textContent = info.you_username || "You";
+    document.getElementById("oppLabel").textContent = info.opponent_username || "Opponent";
+  }
+}
+function handleGameOver(data) {
+  const input = document.getElementById("guessInput");
+  input.disabled = true;
+  document.getElementById("submitGuess").disabled = true;
+
+  const p1Score = data.final_scores?.p1 || 0;
+  const p2Score = data.final_scores?.p2 || 0;
+  const winnerId = data.winner_id;
+
+  let myScore, oppScore;
+  if (isPlayerOne) {
+    myScore = p1Score;
+    oppScore = p2Score;
+  } else {
+    myScore = p2Score;
+    oppScore = p1Score;
+  }
+
+  document.getElementById("scoreP1").textContent = String(myScore);
+  document.getElementById("scoreP2").textContent = String(oppScore);
+
+  let message;
+  if (winnerId == null) {
+    message = "It’s a tie!";
+  } else if (currentUserId != null && Number(winnerId) === Number(currentUserId)) {
+    message = "You won! Great job!";
+  } else {
+    message = "You lost. Better luck next time!";
+  }
+
+  showStatus(message, winnerId === currentUserId ? "success" : "info");
 }
 
-if (backToLobbyBtn) {
-  backToLobbyBtn.addEventListener("click", async () => {
-    try { await postJson("/queue/cancel"); } catch (_) {}
-    stopHeartbeat();
-    window.location.href = "/lobby";
-  });
-}
+document.addEventListener("DOMContentLoaded", () => {
+  document.getElementById("backToLobby").onclick = () => (window.location = "/lobby");
+  document.getElementById("backToLobby2").onclick = () => (window.location = "/lobby");
 
-playAgainBtn.addEventListener("click", () => {
-  window.location.href = "/lobby";
+  document.getElementById("submitGuess").onclick = submitGuess;
+  document.getElementById("guessInput").addEventListener("keypress", (e) => {
+    if (e.key === "Enter") submitGuess();
+  });
+
+  document.getElementById("playAgain").onclick = async () => {
+    // Reset state and queue again
+    currentRoom = null;
+    isPlayerOne = null;
+    showWaiting();
+    await joinQueue();
+  };
+
+  showWaiting();
+  initSocket();
 });
-
-// Initial UI
-setWaitingUI();
