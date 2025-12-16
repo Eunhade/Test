@@ -88,6 +88,33 @@ def load_user(user_id):
 # --------------------
 # Page routes
 # --------------------
+@app.route("/match_info")
+@login_required
+def match_info():
+    room = (request.args.get("room") or "").strip()
+    if not room:
+        return jsonify({"error": "room required"}), 400
+
+    meta = r.hgetall(f"game:{room}:meta")
+    if not meta:
+        return jsonify({"error": "match not found"}), 404
+
+    try:
+        p1_id = int(meta.get("p1"))
+        p2_id = int(meta.get("p2"))
+    except Exception:
+        return jsonify({"error": "invalid match metadata"}), 500
+
+    p1 = User.query.get(p1_id)
+    p2 = User.query.get(p2_id)
+
+    you_is_p1 = (current_user.id == p1_id)
+    return jsonify({
+        "room": room,
+        "you_username": (p1.username if you_is_p1 else p2.username) if (p1 and p2) else current_user.username,
+        "opponent_username": (p2.username if you_is_p1 else p1.username) if (p1 and p2) else "Opponent",
+    })
+
 @app.route("/")
 def index():
     # Login page (v2 art style)
@@ -316,6 +343,35 @@ def active_match():
 # --------------------
 # Socket.IO events
 # --------------------
+@socketio.on("surrender")
+def on_surrender(data):
+    if not current_user.is_authenticated:
+        return
+
+    room = (data or {}).get("room")
+    if not room:
+        return
+
+    meta = r.hgetall(f"game:{room}:meta")
+    if not meta:
+        return
+
+    p1 = str(meta.get("p1", ""))
+    p2 = str(meta.get("p2", ""))
+    me = str(current_user.id)
+
+    if me not in (p1, p2):
+        return  # not a participant
+
+    winner_id = int(p2) if me == p1 else int(p1)
+
+    # Tell the game worker to end the match early
+    r.publish(END_GAME_CHANNEL, json.dumps({
+        "room": room,
+        "winner_id": winner_id,
+        "surrender_by": int(me)
+    }))
+
 @socketio.on("connect")
 def on_connect():
     global pubsub_listener_started
