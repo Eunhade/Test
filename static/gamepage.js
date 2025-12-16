@@ -103,9 +103,24 @@ function initSocket() {
     setTimeout(() => (window.location = "/"), 800);
   });
 
+  socket.on("disconnect", () => {
+    if (window.__hbInterval) {
+      clearInterval(window.__hbInterval);
+      window.__hbInterval = null;
+    }
+  });
+
   socket.on("connected", async (data) => {
     currentUserId = data.user_id;
     document.getElementById("identity").textContent = `Logged in as ${data.username}`;
+
+    // Keep online presence fresh for the matchmaker (TTL-based)
+    if (window.__hbInterval) clearInterval(window.__hbInterval);
+    window.__hbInterval = setInterval(() => {
+      try {
+        if (socket && socket.connected) socket.emit("heartbeat");
+      } catch (_) {}
+    }, 25000);
 
     // First: see if we were already assigned a room (prevents missed match_found)
     const active = await api("/active_match");
