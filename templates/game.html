@@ -15,6 +15,11 @@
             <div class="loading-spinner"></div>
             <p id="waitingStatus">Searching for a match...</p>
             <p id="opponentStatus"></p>
+
+            <div class="row" style="margin-top: 14px; justify-content: center;">
+                <button id="cancelQueueBtn" class="btn secondary">Cancel Queue</button>
+                <button id="backToLobbyBtn" class="btn secondary" style="margin-left: 10px;">Back to Lobby</button>
+            </div>
         </div>
         
         <!-- Game Area -->
@@ -49,8 +54,8 @@
             <!-- Input Area -->
             <div class="input-area">
                 <input type="text" id="guessInput" maxlength="5" placeholder="Enter guess..." autocomplete="off">
-                <button id="submitBtn" class="btn btn-primary">Submit</button>
-                <button id="surrenderBtn" class="btn btn-danger">Surrender</button>
+                <button id="submitBtn" class="btn">Submit</button>
+                <button id="surrenderBtn" class="btn danger">Surrender</button>
             </div>
             
             <!-- Error Message -->
@@ -61,7 +66,7 @@
                 <h2>Game Over!</h2>
                 <div id="resultMessage"></div>
                 <div id="finalScores"></div>
-                <button id="playAgainBtn" class="btn btn-primary">Back to Lobby</button>
+                <button id="playAgainBtn" class="btn">Back to Lobby</button>
             </div>
         </div>
         
