@@ -1,4 +1,5 @@
 // gamepage.js - Multiplayer game client with active match restore + name display + surrender
+// UPDATED: auto-join matchmaking queue on /game load + cancel queue button
 
 const socket = io();
 
@@ -31,6 +32,8 @@ const wordGrid = document.getElementById("wordGrid");
 const guessInput = document.getElementById("guessInput");
 const submitBtn = document.getElementById("submitBtn");
 const surrenderBtn = document.getElementById("surrenderBtn");
+const cancelQueueBtn = document.getElementById("cancelQueueBtn");
+const backToLobbyBtn = document.getElementById("backToLobbyBtn");
 const errorMessage = document.getElementById("errorMessage");
 const gameResults = document.getElementById("gameResults");
 const resultMessage = document.getElementById("resultMessage");
@@ -44,12 +47,42 @@ function startHeartbeat() {
     try {
       if (socket && socket.connected) socket.emit("presence");
     } catch (_) {}
-  }, 20000); // ONLINE_TTL is 60s on server; 20s keeps it fresh
+  }, 20000);
 }
 
 function stopHeartbeat() {
   if (heartbeatInterval) clearInterval(heartbeatInterval);
   heartbeatInterval = null;
+}
+
+async function postJson(path, body = null) {
+  const opts = { method: "POST", headers: { "Content-Type": "application/json" } };
+  if (body) opts.body = JSON.stringify(body);
+  const res = await fetch(path, opts);
+  let data = {};
+  try { data = await res.json(); } catch (_) { data = {}; }
+  data._status = res.status;
+  return data;
+}
+
+async function queueForMatch() {
+  try {
+    waitingStatus.textContent = "Joining matchmaking queue...";
+    const res = await postJson("/queue");
+    if (res.queued) {
+      waitingStatus.textContent = "Searching for a match...";
+      return true;
+    }
+    if (res._status === 400 && (res.error || "").toLowerCase().includes("already")) {
+      waitingStatus.textContent = "Searching for a match...";
+      return true;
+    }
+    waitingStatus.textContent = res.error || "Failed to join queue";
+    return false;
+  } catch (_) {
+    waitingStatus.textContent = "Failed to join queue";
+    return false;
+  }
 }
 
 function showError(message) {
@@ -118,9 +151,7 @@ async function updateNamesForRoom(room) {
     if (opponentStatus && data.opponent_username) {
       opponentStatus.textContent = `Opponent: ${data.opponent_username}`;
     }
-  } catch (_) {
-    // ignore
-  }
+  } catch (_) {}
 }
 
 function setWaitingUI() {
@@ -143,31 +174,11 @@ function disableInputs(disabled) {
   if (surrenderBtn) surrenderBtn.disabled = disabled;
 }
 
-function resetMatchState() {
-  matchStarted = false;
-  matchEnded = false;
-  currentRoom = null;
-  isPlayer1 = null;
-
-  initGrid();
-  timerElement.textContent = "5:00";
-  myScoreElement.textContent = "0";
-  oppScoreElement.textContent = "0";
-  if (youLabel) youLabel.textContent = "You";
-  if (oppLabel) oppLabel.textContent = "Opponent";
-
-  gameMessage.textContent = "Guess the 5-letter word!";
-  hideError();
-  gameResults.classList.add("hidden");
-  disableInputs(false);
-}
-
 function handleGameOver(data) {
   matchEnded = true;
   disableInputs(true);
   stopHeartbeat();
 
-  // Show results panel
   gameResults.classList.remove("hidden");
 
   const final = data?.final_scores || {};
@@ -178,7 +189,6 @@ function handleGameOver(data) {
   const surrenderedBy = data?.surrendered_by ?? null;
 
   let msg = "";
-
   if (reason === "surrender") {
     if (surrenderedBy && currentUserId && Number(surrenderedBy) === Number(currentUserId)) {
       msg = "You surrendered. You lose.";
@@ -204,7 +214,6 @@ function handleGameOver(data) {
   connectionStatus.textContent = "Game Over";
 }
 
-// Try to restore active match on page load (prevents missing match_found event)
 async function tryRestoreActiveMatch() {
   try {
     const res = await fetch("/active_match");
@@ -222,15 +231,10 @@ async function tryRestoreActiveMatch() {
     initGrid();
     disableInputs(false);
 
-    // Join the Socket.IO room so we receive timer + score updates
     socket.emit("join_room", { room: currentRoom });
-
-    // Update displayed names
     updateNamesForRoom(currentRoom);
 
-    // Update status text
     if (opponentStatus) opponentStatus.textContent = "Match restored. Rejoining...";
-
     return true;
   } catch (_) {
     return false;
@@ -253,14 +257,16 @@ socket.on("connected", (data) => {
   currentUserId = data.user_id;
   currentUsername = data.username;
 
-  // Attempt restore; if none, stay waiting
-  tryRestoreActiveMatch().then((restored) => {
-    if (!restored) setWaitingUI();
+  tryRestoreActiveMatch().then(async (restored) => {
+    if (!restored) {
+      setWaitingUI();
+      await queueForMatch(); // ✅ THIS WAS MISSING IN YOUR ZIP
+    }
   });
 });
 
 socket.on("match_found", (data) => {
-  if (matchStarted && currentRoom) return; // prevent duplicates
+  if (matchStarted && currentRoom) return;
   matchStarted = true;
   matchEnded = false;
 
@@ -270,23 +276,19 @@ socket.on("match_found", (data) => {
   waitingStatus.textContent = "Match found! Preparing game...";
   opponentStatus.textContent = "Starting soon...";
 
-  // Show game UI
   setGameUI();
   initGrid();
   disableInputs(false);
 
-  // Make sure surrender button is usable
   if (surrenderBtn) {
     surrenderBtn.disabled = false;
     surrenderBtn.textContent = "Surrender";
   }
 
-  // Join the room slightly after match_found
   setTimeout(() => {
     socket.emit("join_room", { room: currentRoom });
   }, 150);
 
-  // Fetch usernames for display
   updateNamesForRoom(currentRoom);
 });
 
@@ -311,24 +313,15 @@ socket.on("guess_feedback", (data) => {
   const solved = !!data.solved;
 
   currentGuesses.push(guess);
-
   updateRowWithGuess(currentWordRow, guess, colors);
-
   currentWordRow++;
 
-  if (solved) {
-    // reset input and continue
-    guessInput.value = "";
-  }
+  if (solved) guessInput.value = "";
 
-  if (currentWordRow >= maxRows) {
-    // reset grid after filling
-    initGrid();
-  }
+  if (currentWordRow >= maxRows) initGrid();
 });
 
 socket.on("new_word", (data) => {
-  // optional: message on new word
   if (data?.message) {
     gameMessage.textContent = data.message;
     setTimeout(() => (gameMessage.textContent = "Guess the 5-letter word!"), 1500);
@@ -341,10 +334,6 @@ socket.on("guess_error", (data) => {
 
 socket.on("game_over", (data) => {
   handleGameOver(data);
-});
-
-socket.on("match_saved", (_data) => {
-  // optional hook; we already show game_over UI
 });
 
 // --------------------
@@ -377,13 +366,34 @@ if (surrenderBtn) {
     const ok = confirm("Are you sure you want to surrender? You will lose this match.");
     if (!ok) return;
 
-    // prevent double clicks
     surrenderBtn.disabled = true;
     surrenderBtn.textContent = "Surrendering...";
-
     disableInputs(true);
 
     socket.emit("surrender", { room: currentRoom });
+  });
+}
+
+if (cancelQueueBtn) {
+  cancelQueueBtn.addEventListener("click", async () => {
+    try {
+      cancelQueueBtn.disabled = true;
+      waitingStatus.textContent = "Canceling queue...";
+      await postJson("/queue/cancel");
+      stopHeartbeat();
+      window.location.href = "/lobby";
+    } catch (_) {
+      cancelQueueBtn.disabled = false;
+      waitingStatus.textContent = "Failed to cancel queue";
+    }
+  });
+}
+
+if (backToLobbyBtn) {
+  backToLobbyBtn.addEventListener("click", async () => {
+    try { await postJson("/queue/cancel"); } catch (_) {}
+    stopHeartbeat();
+    window.location.href = "/lobby";
   });
 }
 
