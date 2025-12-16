@@ -66,6 +66,7 @@ login_manager.login_view = "index"
 # Redis connection for game state and pubsub
 r = redis.from_url(REDIS_URL, decode_responses=True)
 
+END_GAME_CHANNEL = "end_game"
 QUEUE_KEY = "matchmaking_queue"
 EVENT_CHANNEL = "events"
 ONLINE_KEY_FMT = "user:{uid}:online"
