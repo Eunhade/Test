@@ -57,7 +57,7 @@ QUEUE_KEY = "matchmaking_queue"
 EVENT_CHANNEL = "events"
 
 # Presence tracking to prevent matching with offline/stale queue entries
-ONLINE_TTL = 60  # seconds
+ONLINE_TTL = 600  # seconds
 
 
 def touch_online(user_id: int):
@@ -188,6 +188,9 @@ def logout():
 @login_required
 def join_queue():
     """Add authenticated user to matchmaking queue."""
+    # Mark presence so matchmaker can consider this user online even before Socket.IO connects
+    touch_online(current_user.id)
+
     # Check if already in queue
     queue_list = r.lrange(QUEUE_KEY, 0, -1)
     if str(current_user.id) in queue_list:
@@ -226,43 +229,7 @@ def leaderboard():
         "win_rate": round(u.win_rate, 1)
     } for u in top_players])
 
-@app.route("/match_info")
-@login_required
-def match_info():
-    """Return usernames for both players in a room (and who is you/opponent)."""
-    room = (request.args.get("room") or "").strip()
-    if not room:
-        return jsonify({"error": "room required"}), 400
 
-    meta = r.hgetall(f"game:{room}:meta")
-    if not meta:
-        return jsonify({"error": "match not found"}), 404
-
-    try:
-        p1_id = int(meta.get("p1"))
-        p2_id = int(meta.get("p2"))
-    except Exception:
-        return jsonify({"error": "corrupt match data"}), 500
-
-    if current_user.id not in (p1_id, p2_id):
-        return jsonify({"error": "not a player in this match"}), 403
-
-    p1 = User.query.get(p1_id)
-    p2 = User.query.get(p2_id)
-
-    you_is_p1 = (current_user.id == p1_id)
-
-    return jsonify({
-        "room": room,
-        "p1_id": p1_id,
-        "p2_id": p2_id,
-        "p1_username": p1.username if p1 else None,
-        "p2_username": p2.username if p2 else None,
-        "you_id": current_user.id,
-        "you_username": (p1.username if you_is_p1 else p2.username) if (p1 and p2) else current_user.username,
-        "opponent_id": (p2_id if you_is_p1 else p1_id),
-        "opponent_username": (p2.username if you_is_p1 else p1.username) if (p1 and p2) else "Opponent",
-    })
 # --------------------
 # Socket.IO events
 # --------------------
@@ -311,96 +278,6 @@ def on_join_room(data):
         "username": current_user.username
     }, room=room)
 
-@socketio.on("surrender")
-def on_surrender(data):
-    """End the game immediately: surrendering player loses, opponent wins."""
-    room = (data or {}).get("room")
-    if not room:
-        emit("guess_error", {"error": "Missing room"})
-        return
-
-    gkey = f"game:{room}:meta"
-    meta = r.hgetall(gkey)
-    if not meta:
-        emit("guess_error", {"error": "Match not found or already ended"})
-        return
-
-    try:
-        p1_id = int(meta.get("p1"))
-        p2_id = int(meta.get("p2"))
-    except Exception:
-        emit("guess_error", {"error": "Corrupt match data"})
-        return
-
-    if current_user.id not in (p1_id, p2_id):
-        emit("guess_error", {"error": "You are not in this match"})
-        return
-
-    # Idempotency guard so two surrenders / timer don't double-save
-    end_key = f"game:{room}:ended"
-    if not r.set(end_key, "1", nx=True, ex=3600):
-        return  # already ended elsewhere
-
-    winner_id = (p2_id if current_user.id == p1_id else p1_id)
-
-    scores = game_module.get_scores(r, room)
-    score_p1 = int(scores.get("p1", 0))
-    score_p2 = int(scores.get("p2", 0))
-    duration = int(meta.get("duration", 300))
-
-    # Persist match + update stats (same behavior as game_worker)
-    try:
-        match = Match(
-            room=room,
-            p1_id=p1_id,
-            p2_id=p2_id,
-            score_p1=score_p1,
-            score_p2=score_p2,
-            winner_id=winner_id,
-            duration=duration
-        )
-        db.session.add(match)
-
-        user1 = User.query.get(p1_id)
-        user2 = User.query.get(p2_id)
-
-        if user1:
-            user1.total_games = (user1.total_games or 0) + 1
-            if winner_id == user1.id:
-                user1.total_wins = (user1.total_wins or 0) + 1
-
-        if user2:
-            user2.total_games = (user2.total_games or 0) + 1
-            if winner_id == user2.id:
-                user2.total_wins = (user2.total_wins or 0) + 1
-
-        db.session.commit()
-    except Exception:
-        db.session.rollback()
-        r.delete(end_key)  # allow retry if DB write failed
-        emit("guess_error", {"error": "Failed to save surrender result"})
-        return
-
-    # Notify both clients (SocketIO message_queue will broadcast cross-process)
-    socketio.emit("match_saved", {
-        "winner_id": winner_id,
-        "scores": {"p1": score_p1, "p2": score_p2}
-    }, room=room)
-
-    socketio.emit("game_over", {
-        "room": room,
-        "final_scores": {"p1": score_p1, "p2": score_p2},
-        "winner_id": winner_id,
-        "reason": "surrender",
-        "surrendered_by": current_user.id
-    }, room=room)
-
-    # Stop timer thread + cleanup Redis keys so game_worker won't double-end it
-    try:
-        r.delete(f"game:{room}:time_left")
-    except Exception:
-        pass
-    game_module.end_game_cleanup(r, room)
 
 @socketio.on("submit_guess")
 def on_submit_guess(data):
