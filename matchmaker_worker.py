@@ -91,7 +91,6 @@ def start_matchmaker():
 
             # Create game in Redis
             room = create_game(r, p1, p2)
-            TTL = 60 * 60
 
             # Persist match assignment for each user so the web UI can recover
             # even if the SocketIO event is missed (navigation / refresh).
